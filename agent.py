@@ -14,82 +14,100 @@ except Exception:
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 MODEL = "claude-haiku-4-5-20251001"
 
-def build_mood_playlist(tracks, mood, custom_mood=None):
-    mood_description = custom_mood if custom_mood else mood
-
+def build_mood_playlist(tracks, mood, preferences=None):
     track_list = ""
     for i, track in enumerate(tracks):
-        track_list += f"{i}. {track['name']} by {track['artist']} (album: {track['album']}, popularity: {track['popularity']})\n"
+        energy       = track.get("energy")
+        valence      = track.get("valence")
+        danceability = track.get("danceability")
+        tempo        = track.get("tempo")
+        acousticness = track.get("acousticness")
+        instrumental = track.get("instrumentalness")
 
-    prompt = f"""You are a music curator AI. A user is feeling: "{mood_description}"
+        audio_str = ""
+        if energy is not None:
+            audio_str = (
+                f" [energy:{energy} valence:{valence} "
+                f"dance:{danceability} bpm:{tempo} "
+                f"acoustic:{acousticness} instrumental:{instrumental}]"
+            )
 
-Here is their full track library pulled from their Spotify playlists:
+        track_list += (
+            f"{i}. {track['name']} by {track['artist']}"
+            f" (album: {track['album']}, popularity: {track['popularity']})"
+            f"{audio_str}\n"
+        )
 
+    prefs_text = ""
+    if preferences:
+        activity    = preferences.get("activity", "")
+        energy_lvl  = preferences.get("energy", "")
+        language    = preferences.get("language", "")
+        include     = preferences.get("include_artists", "")
+        exclude     = preferences.get("exclude_artists", "")
+        extra       = preferences.get("extra", "")
+
+        if activity:    prefs_text += f"- Activity: {activity}\n"
+        if energy_lvl:  prefs_text += f"- Energy level requested: {energy_lvl}/10\n"
+        if language:    prefs_text += f"- Language preference: {language}\n"
+        if include:     prefs_text += f"- Prioritize tracks by: {include}\n"
+        if exclude:     prefs_text += f"- Exclude tracks by: {exclude}\n"
+        if extra:       prefs_text += f"- Additional: {extra}\n"
+
+    prompt = f"""You are a professional music curator AI with deep knowledge of music theory, audio characteristics, and mood psychology.
+
+A user is feeling: "{mood}"
+
+User preferences:
+{prefs_text if prefs_text else "No additional preferences provided."}
+
+Here is their track library with Spotify audio features:
+- energy: 0.0 (very calm) to 1.0 (very intense)
+- valence: 0.0 (sad/dark) to 1.0 (happy/euphoric)
+- dance: 0.0 (not danceable) to 1.0 (very danceable)
+- bpm: beats per minute
+- acoustic: 0.0 (electronic) to 1.0 (fully acoustic)
+- instrumental: 0.0 (vocal) to 1.0 (fully instrumental)
+
+TRACKS:
 {track_list}
 
-Your job:
-1. Select the 20-30 tracks that best match the mood "{mood_description}"
-2. Order them for the best listening experience — consider energy flow, tempo progression, emotional arc
-3. For each selected track return the original index number from the list above
+CURATION RULES:
 
-Rules:
-- Only select tracks from the list above — no invented tracks
-- Think about the emotional energy of each song name and artist
-- Consider how songs flow together — don't just pick randomly
-- Return ONLY a JSON object, no markdown, no explanation
+Mood to audio feature mapping:
+- Hype/Party: energy > 0.7, valence > 0.5, dance > 0.6, bpm > 120
+- Chill/Relax: energy < 0.5, valence 0.3-0.7, bpm < 100
+- Focus/Study: instrumental > 0.3, energy 0.3-0.6, speechiness < 0.1
+- Sad/Melancholic: valence < 0.4, energy < 0.5, acoustic > 0.3
+- Nostalgic: valence 0.4-0.7, energy 0.3-0.6, acoustic > 0.2
+- Romantic: valence 0.4-0.7, energy 0.2-0.5, dance 0.3-0.6
 
-Return this exact JSON structure:
+Energy level mapping (user requested {preferences.get('energy', '5') if preferences else '5'}/10):
+- 1-2: energy < 0.3
+- 3-4: energy 0.3-0.5
+- 5-6: energy 0.5-0.7
+- 7-8: energy 0.7-0.85
+- 9-10: energy > 0.85
+
+Instructions:
+1. Use the audio features as your PRIMARY filter — they are objective measurements
+2. Select exactly 80 tracks (or all tracks if fewer than 80 available)
+3. Order them for the best listening experience — start at medium energy, build to peak, cool down
+4. Respect ALL user preferences strictly
+5. If audio features are missing for a track, use your knowledge of the artist/song to estimate
+6. Return ONLY a JSON object
+
+Return this exact structure:
 {{
-  "playlist_name": "a creative playlist name that reflects the mood",
-  "playlist_description": "a one sentence description of the vibe",
-  "selected_indices": [list of integer indices in the order they should be played],
-  "mood_summary": "2-3 sentences explaining why these tracks fit this mood and how the playlist flows"
+  "playlist_name": "creative name reflecting mood and activity",
+  "playlist_description": "one sentence describing the vibe",
+  "selected_indices": [list of integer indices in playback order],
+  "mood_summary": "2-3 sentences explaining the curation logic and how the playlist flows"
 }}"""
 
     response = client.messages.create(
         model=MODEL,
-        max_tokens=1000,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    raw = response.content[0].text
-    start = raw.find("{")
-    end = raw.rfind("}") + 1
-    parsed = json.loads(raw[start:end])
-    return parsed
-
-def score_recommendations(recommendations, mood, existing_tracks):
-    mood_description = mood
-
-    existing_sample = ", ".join([
-        f"{t['name']} by {t['artist']}"
-        for t in existing_tracks[:10]
-    ])
-
-    rec_list = ""
-    for i, track in enumerate(recommendations):
-        rec_list += f"{i}. {track['name']} by {track['artist']} (album: {track['album']})\n"
-
-    prompt = f"""You are a music curator AI. A user is feeling: "{mood_description}"
-
-Their current mood playlist already includes tracks like:
-{existing_sample}
-
-Here are Spotify's recommended tracks that could be added:
-{rec_list}
-
-Select the 8-10 recommendations that would best complement the existing playlist and match the mood.
-Order them from best fit to least fit.
-
-Return ONLY a JSON object:
-{{
-  "selected_indices": [list of integer indices ordered by fit],
-  "reasoning": "one sentence explaining the overall recommendation logic"
-}}"""
-
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=500,
+        max_tokens=4000,
         messages=[{"role": "user", "content": prompt}]
     )
 

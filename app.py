@@ -2,8 +2,8 @@ import streamlit as st
 import os
 from dotenv import load_dotenv
 from auth import get_auth_url, handle_callback, get_spotify_client, is_logged_in, logout
-from spotify import get_user_profile, get_all_playlists, get_recommendations, create_spotify_playlist
-from agent import build_mood_playlist, score_recommendations
+from spotify import get_user_profile, get_all_playlists, create_spotify_playlist, enrich_tracks_with_audio_features
+from agent import build_mood_playlist
 
 load_dotenv()
 
@@ -110,6 +110,26 @@ h3 {
     color: #888;
 }
 
+.audio-bar {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.audio-tag {
+    font-size: 0.62rem;
+    color: #333;
+    background: #1a1a1a;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: monospace;
+}
+
+.audio-tag.high { color: #1DB954; }
+.audio-tag.mid  { color: #888; }
+.audio-tag.low  { color: #444; }
+
 .playlist-header {
     background: linear-gradient(135deg, #0d2818, #1a1a2e);
     border: 1px solid #1DB954;
@@ -139,14 +159,6 @@ h3 {
     text-transform: uppercase;
 }
 
-.rec-card {
-    background: #141414;
-    border: 1px solid #1e1e1e;
-    border-radius: 10px;
-    padding: 0.9rem 1rem;
-    margin-bottom: 0.5rem;
-}
-
 .section-label {
     font-size: 0.65rem;
     font-weight: 700;
@@ -164,6 +176,14 @@ h3 {
     font-size: 0.85rem;
     color: #aaa;
     display: inline-block;
+}
+
+.pref-card {
+    background: #141414;
+    border: 1px solid #1e1e1e;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
 }
 
 hr { border-color: #1e1e1e !important; margin: 2rem 0 !important; }
@@ -190,14 +210,19 @@ hr { border-color: #1e1e1e !important; margin: 2rem 0 !important; }
     font-size: 0.95rem !important;
 }
 
-.stMultiSelect > div {
+.stSelectbox > div > div {
     background: #141414 !important;
     border: 1px solid #2a2a2a !important;
     border-radius: 8px !important;
     color: #ffffff !important;
 }
 
-.stCheckbox label { color: #aaaaaa !important; }
+.stMultiSelect > div {
+    background: #141414 !important;
+    border: 1px solid #2a2a2a !important;
+    border-radius: 8px !important;
+    color: #ffffff !important;
+}
 
 [data-testid="column"] { padding: 0 0.4rem !important; }
 </style>
@@ -230,8 +255,8 @@ if not is_logged_in():
             <div style="font-size:1rem; color:#888; line-height:2;">
             1 → Connect your Spotify account<br>
             2 → Pick your current mood<br>
-            3 → AI scans your playlists and builds the perfect mix<br>
-            4 → Discover new songs that match your vibe<br>
+            3 → Set your preferences — activity, energy, language<br>
+            4 → AI scans your playlists using real audio data<br>
             5 → Export directly to your Spotify
             </div>
         </div>
@@ -251,8 +276,8 @@ if not is_logged_in():
             <div style="font-size:1rem; font-weight:600; color:#fff; margin-bottom:0.5rem;">
             Mood-powered playlists</div>
             <div style="font-size:0.85rem; color:#666; line-height:1.75;">
-            Musara reads your existing Spotify library and uses Claude AI to build
-            a perfectly curated playlist for how you feel right now.
+            Musara uses Spotify audio features — energy, valence, BPM, danceability —
+            to match tracks to your exact mood and preferences.
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -321,8 +346,76 @@ active_mood = custom_mood.strip() if custom_mood.strip() else st.session_state.g
 
 st.markdown('<hr>', unsafe_allow_html=True)
 
-# ── Step 2: Select playlists ───────────────────────────────────────────────
-st.markdown('<div class="section-label">Step 02 — Choose playlists to pull from</div>',
+# ── Step 2: Preferences ────────────────────────────────────────────────────
+st.markdown('<div class="section-label">Step 02 — Set your preferences</div>',
+            unsafe_allow_html=True)
+
+st.markdown('<div class="pref-card">', unsafe_allow_html=True)
+
+pref_col1, pref_col2 = st.columns(2)
+
+with pref_col1:
+    activity = st.selectbox(
+        "What are you doing?",
+        options=["", "Driving", "Working out / Gym", "Studying / Focus",
+                 "Party / Going out", "Cooking", "Relaxing at home",
+                 "Running", "Working", "Getting ready"],
+        index=0
+    )
+    language = st.selectbox(
+        "Language preference",
+        options=["No preference", "Spanish", "English",
+                 "Mixed (Spanish + English)", "Portuguese", "French"],
+        index=0
+    )
+    include_artists = st.text_input(
+        "Artists to prioritize",
+        placeholder="e.g. Bad Bunny, J Balvin, Drake"
+    )
+
+with pref_col2:
+    energy = st.slider(
+        "Energy level",
+        min_value=1,
+        max_value=10,
+        value=5
+    )
+    energy_label = (
+        "🔇 Very calm"    if energy <= 2 else
+        "🎵 Laid back"    if energy <= 4 else
+        "🎶 Moderate"     if energy <= 6 else
+        "🔥 High energy"  if energy <= 8 else
+        "⚡ Maximum energy"
+    )
+    st.markdown(
+        f'<div style="font-size:0.75rem; color:#555; margin-top:-0.5rem; '
+        f'margin-bottom:1rem;">{energy_label}</div>',
+        unsafe_allow_html=True
+    )
+    exclude_artists = st.text_input(
+        "Artists to exclude",
+        placeholder="e.g. Reggaeton artists, EDM"
+    )
+    extra_prefs = st.text_input(
+        "Anything else?",
+        placeholder="e.g. only 2000s throwbacks, no explicit lyrics..."
+    )
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+preferences = {
+    "activity":        activity,
+    "energy":          str(energy),
+    "language":        language if language != "No preference" else "",
+    "include_artists": include_artists,
+    "exclude_artists": exclude_artists,
+    "extra":           extra_prefs
+}
+
+st.markdown('<hr>', unsafe_allow_html=True)
+
+# ── Step 3: Select playlists ───────────────────────────────────────────────
+st.markdown('<div class="section-label">Step 03 — Choose playlists to pull from</div>',
             unsafe_allow_html=True)
 
 if "playlists" not in st.session_state:
@@ -349,8 +442,8 @@ selected_ids = [playlist_options[name] for name in selected_names] if selected_n
 
 st.markdown('<hr>', unsafe_allow_html=True)
 
-# ── Step 3: Build ──────────────────────────────────────────────────────────
-st.markdown('<div class="section-label">Step 03 — Build your playlist</div>',
+# ── Step 4: Build ──────────────────────────────────────────────────────────
+st.markdown('<div class="section-label">Step 04 — Build your playlist</div>',
             unsafe_allow_html=True)
 
 build_btn = st.button("✨ Build Mood Playlist", type="primary")
@@ -371,9 +464,9 @@ if build_btn:
             try:
                 results = sp.playlist_tracks(pid, limit=50)
                 count = 0
-                while results and count < 150:
+                while results and count < 400:
                     for item in results["items"]:
-                        if count >= 150:
+                        if count >= 400:
                             break
                         if not item:
                             continue
@@ -383,17 +476,17 @@ if build_btn:
                         if track["id"] not in seen_ids:
                             seen_ids.add(track["id"])
                             all_tracks.append({
-                                "id": track["id"],
-                                "name": track["name"],
-                                "artist": track["artists"][0]["name"] if track.get("artists") else "Unknown",
-                                "album": track["album"]["name"] if track.get("album") else "Unknown",
-                                "image": track["album"]["images"][0]["url"] if track.get("album") and track["album"].get("images") else None,
-                                "uri": track["uri"],
+                                "id":          track["id"],
+                                "name":        track["name"],
+                                "artist":      track["artists"][0]["name"] if track.get("artists") else "Unknown",
+                                "album":       track["album"]["name"] if track.get("album") else "Unknown",
+                                "image":       track["album"]["images"][0]["url"] if track.get("album") and track["album"].get("images") else None,
+                                "uri":         track["uri"],
                                 "preview_url": track.get("preview_url"),
-                                "popularity": track.get("popularity", 0)
+                                "popularity":  track.get("popularity", 0)
                             })
                             count += 1
-                    if results["next"] and count < 150:
+                    if results["next"] and count < 400:
                         results = sp.next(results)
                     else:
                         break
@@ -405,8 +498,11 @@ if build_btn:
         st.error("No tracks found. Try selecting different playlists.")
         st.stop()
 
-    with st.spinner(f"Claude is curating your {active_mood} playlist..."):
-        result = build_mood_playlist(all_tracks, active_mood)
+    with st.spinner(f"Analyzing audio features for {len(all_tracks)} tracks..."):
+        all_tracks = enrich_tracks_with_audio_features(all_tracks)
+
+    with st.spinner("Claude is curating your playlist..."):
+        result = build_mood_playlist(all_tracks, active_mood, preferences=preferences)
 
     selected_indices = result.get("selected_indices", [])
     playlist_tracks = []
@@ -415,17 +511,14 @@ if build_btn:
             playlist_tracks.append(all_tracks[idx])
 
     if not playlist_tracks:
-        playlist_tracks = all_tracks[:20]
+        playlist_tracks = all_tracks[:80]
 
     st.session_state["playlist_tracks"] = playlist_tracks
     st.session_state["playlist_name"]   = result.get("playlist_name", f"{active_mood} Mix")
     st.session_state["playlist_desc"]   = result.get("playlist_description", "")
     st.session_state["mood_summary"]    = result.get("mood_summary", "")
     st.session_state["active_mood"]     = active_mood
-    st.session_state["all_tracks"]      = all_tracks
     st.session_state["playlist_built"]  = True
-    st.session_state["recommendations"] = []
-    st.session_state["selected_recs"]   = []
 
 # ── Show playlist ──────────────────────────────────────────────────────────
 if st.session_state.get("playlist_built"):
@@ -457,6 +550,23 @@ if st.session_state.get("playlist_built"):
                     f'<img src="{track["image"]}" width="40" height="40" '
                     f'style="border-radius:4px; flex-shrink:0;"/>'
                 )
+
+            energy_val   = track.get("energy")
+            valence_val  = track.get("valence")
+            bpm_val      = track.get("tempo")
+
+            audio_html = ""
+            if energy_val is not None:
+                e_class = "high" if energy_val > 0.7 else "mid" if energy_val > 0.4 else "low"
+                v_class = "high" if valence_val > 0.6 else "mid" if valence_val > 0.3 else "low"
+                audio_html = (
+                    f'<div class="audio-bar">'
+                    f'<span class="audio-tag {e_class}">⚡{energy_val}</span>'
+                    f'<span class="audio-tag {v_class}">♡{valence_val}</span>'
+                    f'<span class="audio-tag mid">♩{bpm_val}bpm</span>'
+                    f'</div>'
+                )
+
             st.markdown(
                 f'<div class="track-card">'
                 f'{img_html}'
@@ -464,6 +574,7 @@ if st.session_state.get("playlist_built"):
                 f'<div style="flex:1;">'
                 f'<div class="track-name">{track["name"]}</div>'
                 f'<div class="track-artist">{track["artist"]} · {track["album"]}</div>'
+                f'{audio_html}'
                 f'</div>'
                 f'</div>',
                 unsafe_allow_html=True
@@ -473,7 +584,7 @@ if st.session_state.get("playlist_built"):
         st.markdown('<div class="section-label">Export</div>', unsafe_allow_html=True)
         st.markdown(
             f'<div style="font-size:0.85rem; color:#888; margin-bottom:1rem; line-height:1.75;">'
-            f'{len(playlist_tracks)} tracks ready to export to your Spotify account.</div>',
+            f'{len(playlist_tracks)} tracks curated using real audio data.</div>',
             unsafe_allow_html=True
         )
 
@@ -496,96 +607,9 @@ if st.session_state.get("playlist_built"):
                 st.error("Something went wrong exporting.")
 
         st.markdown('<br>', unsafe_allow_html=True)
-        st.markdown('<div class="section-label">Discover new tracks</div>',
-                    unsafe_allow_html=True)
         st.markdown(
-            '<div style="font-size:0.85rem; color:#888; margin-bottom:1rem; line-height:1.75;">'
-            'Get AI-curated song recommendations based on your playlist.</div>',
+            '<div style="font-size:0.75rem; color:#333; line-height:1.75;">'
+            'Each track shows energy ⚡, mood ♡, and BPM ♩ — '
+            'pulled directly from Spotify audio analysis.</div>',
             unsafe_allow_html=True
         )
-
-        if st.button("🔍 Get Recommendations"):
-            with st.spinner("Finding songs you might love..."):
-                seed_ids = [t["id"] for t in playlist_tracks[:5]]
-                raw_recs = get_recommendations(seed_ids, active_mood)
-                if raw_recs:
-                    scored = score_recommendations(
-                        raw_recs, active_mood, playlist_tracks
-                    )
-                    selected_rec_indices = scored.get("selected_indices", [])
-                    final_recs = []
-                    for idx in selected_rec_indices:
-                        if 0 <= idx < len(raw_recs):
-                            final_recs.append(raw_recs[idx])
-                    st.session_state["recommendations"] = final_recs
-                    st.session_state["rec_reasoning"]   = scored.get("reasoning", "")
-
-    # ── Recommendations ────────────────────────────────────────────────────
-    if st.session_state.get("recommendations"):
-        st.markdown('<hr>', unsafe_allow_html=True)
-        st.markdown('<div class="section-label">Recommended tracks</div>',
-                    unsafe_allow_html=True)
-
-        rec_reasoning = st.session_state.get("rec_reasoning", "")
-        if rec_reasoning:
-            st.markdown(
-                f'<div style="font-size:0.85rem; color:#888; margin-bottom:1.5rem;">'
-                f'{rec_reasoning}</div>',
-                unsafe_allow_html=True
-            )
-
-        recs = st.session_state["recommendations"]
-        selected_recs = st.session_state.get("selected_recs", [])
-
-        for i, track in enumerate(recs):
-            col_rec, col_add = st.columns([5, 1])
-            with col_rec:
-                img_html = ""
-                if track.get("image"):
-                    img_html = (
-                        f'<img src="{track["image"]}" width="36" height="36" '
-                        f'style="border-radius:4px; flex-shrink:0;"/>'
-                    )
-                st.markdown(
-                    f'<div class="rec-card" style="display:flex; align-items:center; gap:1rem;">'
-                    f'{img_html}'
-                    f'<div>'
-                    f'<div class="track-name">{track["name"]}</div>'
-                    f'<div class="track-artist">{track["artist"]} · {track["album"]}</div>'
-                    f'</div>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-            with col_add:
-                is_added = track["id"] in [r["id"] for r in selected_recs]
-                if is_added:
-                    st.markdown(
-                        '<div style="color:#1DB954; font-size:0.85rem; '
-                        'padding-top:0.75rem; text-align:center;">✓ Added</div>',
-                        unsafe_allow_html=True
-                    )
-                else:
-                    if st.button("+ Add", key=f"add_rec_{i}"):
-                        if "selected_recs" not in st.session_state:
-                            st.session_state["selected_recs"] = []
-                        st.session_state["selected_recs"].append(track)
-                        st.session_state["playlist_tracks"].append(track)
-                        st.rerun()
-
-        if selected_recs:
-            st.markdown('<br>', unsafe_allow_html=True)
-            if st.button("🎵 Export Updated Playlist to Spotify"):
-                with st.spinner("Exporting updated playlist..."):
-                    all_uris = [t["uri"] for t in st.session_state["playlist_tracks"]]
-                    exported = create_spotify_playlist(
-                        name=f"{playlist_name} (Updated)",
-                        description=f"Created by Musara · Mood: {active_mood} · With recommendations",
-                        track_uris=all_uris
-                    )
-                if exported:
-                    st.success("Updated playlist created!")
-                    st.markdown(
-                        f'<a href="{exported["url"]}" target="_blank" class="spotify-btn">'
-                        f'▶ Open in Spotify</a>',
-                        unsafe_allow_html=True
-                    )

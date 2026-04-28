@@ -43,31 +43,47 @@ def get_all_playlists():
             break
     return playlists
 
-def get_recommendations(seed_track_ids, mood_description, limit=20):
+def enrich_tracks_with_audio_features(tracks):
     sp = get_spotify_client()
-    if not sp:
-        return []
-    seed_tracks = seed_track_ids[:5]
-    try:
-        results = sp.recommendations(
-            seed_tracks=seed_tracks,
-            limit=limit
-        )
-        recommendations = []
-        for track in results["tracks"]:
-            recommendations.append({
-                "id": track["id"],
-                "name": track["name"],
-                "artist": track["artists"][0]["name"] if track["artists"] else "Unknown",
-                "album": track["album"]["name"],
-                "image": track["album"]["images"][0]["url"] if track["album"]["images"] else None,
-                "uri": track["uri"],
-                "preview_url": track.get("preview_url"),
-                "popularity": track.get("popularity", 0)
-            })
-        return recommendations
-    except Exception:
-        return []
+    if not sp or not tracks:
+        return tracks
+    track_ids = [t["id"] for t in tracks]
+    features_map = {}
+    # fetch in batches of 100 (Spotify limit)
+    for i in range(0, len(track_ids), 100):
+        batch = track_ids[i:i+100]
+        try:
+            features = sp.audio_features(batch)
+            if features:
+                for f in features:
+                    if f and f.get("id"):
+                        features_map[f["id"]] = {
+                            "energy":           round(f.get("energy", 0), 2),
+                            "valence":          round(f.get("valence", 0), 2),
+                            "danceability":     round(f.get("danceability", 0), 2),
+                            "tempo":            round(f.get("tempo", 0)),
+                            "acousticness":     round(f.get("acousticness", 0), 2),
+                            "instrumentalness": round(f.get("instrumentalness", 0), 2),
+                            "loudness":         round(f.get("loudness", 0), 1),
+                            "speechiness":      round(f.get("speechiness", 0), 2),
+                        }
+        except Exception:
+            continue
+    # merge features into tracks
+    enriched = []
+    for track in tracks:
+        t = track.copy()
+        f = features_map.get(track["id"], {})
+        t["energy"]           = f.get("energy", None)
+        t["valence"]          = f.get("valence", None)
+        t["danceability"]     = f.get("danceability", None)
+        t["tempo"]            = f.get("tempo", None)
+        t["acousticness"]     = f.get("acousticness", None)
+        t["instrumentalness"] = f.get("instrumentalness", None)
+        t["loudness"]         = f.get("loudness", None)
+        t["speechiness"]      = f.get("speechiness", None)
+        enriched.append(t)
+    return enriched
 
 def create_spotify_playlist(name, description, track_uris):
     sp = get_spotify_client()
