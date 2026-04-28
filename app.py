@@ -9,220 +9,416 @@ load_dotenv()
 
 st.set_page_config(
     page_title="Musara",
-    page_icon="🎵",
+    page_icon="M",
     layout="wide"
 )
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+:root {
+    --bg:           #060606;
+    --surface:      #0d0d0d;
+    --border:       #191919;
+    --border-hi:    #242424;
+    --text:         #f0f0f0;
+    --text-2:       #666;
+    --text-3:       #2e2e2e;
+    --green:        #1DB954;
+    --green-dim:    rgba(29,185,84,0.08);
+    --green-border: rgba(29,185,84,0.25);
+}
 
 html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
-    background-color: #0a0a0a;
-    color: #ffffff;
+    font-family: 'DM Sans', sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
 }
-.stApp { background-color: #0a0a0a; }
+.stApp { background-color: var(--bg); }
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
 
 .block-container {
     padding: 3rem 4rem;
-    max-width: 1200px;
+    max-width: 1160px;
 }
 
 h1 {
-    font-size: 3rem !important;
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-size: 2.75rem !important;
     font-weight: 700 !important;
-    color: #ffffff !important;
-    letter-spacing: -0.03em !important;
+    color: var(--text) !important;
+    letter-spacing: -0.04em !important;
     margin-bottom: 0 !important;
+    line-height: 1 !important;
 }
 
 h3 {
-    font-size: 1rem !important;
-    font-weight: 300 !important;
-    color: #666666 !important;
-    margin-top: 0.25rem !important;
+    font-size: 0.875rem !important;
+    font-weight: 400 !important;
+    color: var(--text-3) !important;
+    margin-top: 0.5rem !important;
+    letter-spacing: 0.01em !important;
 }
 
+/* ── Spotify connect button ── */
 .spotify-btn {
-    background: #1DB954;
-    color: white;
-    padding: 14px 32px;
-    border-radius: 50px;
+    background: var(--green);
+    color: #000;
+    padding: 10px 22px;
+    border-radius: 6px;
     font-weight: 600;
-    font-size: 1rem;
+    font-size: 0.8125rem;
     text-decoration: none;
     display: inline-block;
-    margin-top: 1rem;
-    letter-spacing: 0.02em;
+    margin-top: 1.5rem;
+    letter-spacing: 0.01em;
+    transition: opacity 0.12s;
 }
+.spotify-btn:hover { opacity: 0.88; }
 
+/* ── Mood cards ── */
 .mood-card {
-    background: #141414;
-    border: 1px solid #222;
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1rem 1rem;
     cursor: pointer;
-    text-align: center;
+    position: relative;
+    transition: border-color 0.12s, background 0.12s;
 }
-
+.mood-card:hover {
+    border-color: var(--border-hi);
+    background: #111;
+}
 .mood-card-selected {
-    background: #0d2818;
-    border: 2px solid #1DB954;
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
-    text-align: center;
+    background: var(--green-dim);
+    border: 1px solid var(--green-border);
+    border-radius: 8px;
+    padding: 1.25rem 1rem 1rem;
+    position: relative;
+}
+.mood-card-selected::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 8px; bottom: 8px;
+    width: 2px;
+    background: var(--green);
+    border-radius: 0 2px 2px 0;
 }
 
-.mood-emoji { font-size: 2rem; margin-bottom: 0.5rem; }
-.mood-label { font-size: 0.9rem; font-weight: 600; color: #ffffff; }
+.mood-name {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.01em;
+    margin-bottom: 0.3rem;
+}
+.mood-sub {
+    font-size: 0.68rem;
+    color: var(--text-3);
+    line-height: 1.4;
+}
+.mood-card-selected .mood-sub { color: rgba(29,185,84,0.45); }
 
-.track-card {
-    background: #141414;
-    border: 1px solid #1e1e1e;
-    border-radius: 10px;
-    padding: 0.9rem 1rem;
-    margin-bottom: 0.5rem;
-    display: flex;
+/* ── Track rows ── */
+.track-row {
+    display: grid;
+    grid-template-columns: 28px 36px 1fr auto;
     align-items: center;
-    gap: 1rem;
+    gap: 12px;
+    padding: 0.6rem 0.75rem;
+    border-radius: 6px;
+    margin-bottom: 2px;
+    transition: background 0.1s;
 }
+.track-row:hover { background: #0f0f0f; }
 
-.track-num {
-    font-size: 0.75rem;
-    color: #444;
-    font-weight: 600;
-    min-width: 20px;
+.track-idx {
+    font-size: 0.7rem;
+    color: var(--text-3);
     text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    font-family: 'Space Grotesk', sans-serif;
 }
-
 .track-name {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: #ffffff;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-
-.track-artist {
-    font-size: 0.8rem;
-    color: #888;
+.track-meta {
+    font-size: 0.7rem;
+    color: var(--text-2);
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-
-.audio-bar {
+.track-tags {
     display: flex;
     gap: 4px;
     align-items: center;
-    margin-top: 4px;
 }
-
-.audio-tag {
-    font-size: 0.62rem;
-    color: #333;
-    background: #1a1a1a;
+.tag {
+    font-size: 0.58rem;
+    color: var(--text-3);
+    background: #111;
+    border: 1px solid var(--border);
     border-radius: 3px;
-    padding: 1px 5px;
-    font-family: monospace;
+    padding: 1px 6px;
+    font-family: 'Space Grotesk', sans-serif;
+    letter-spacing: 0.02em;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.tag-hi {
+    color: var(--green);
+    background: var(--green-dim);
+    border-color: var(--green-border);
 }
 
-.audio-tag.high { color: #1DB954; }
-.audio-tag.mid  { color: #888; }
-.audio-tag.low  { color: #444; }
-
+/* ── Playlist header ── */
 .playlist-header {
-    background: linear-gradient(135deg, #0d2818, #1a1a2e);
-    border: 1px solid #1DB954;
-    border-radius: 16px;
-    padding: 2rem;
-    margin-bottom: 2rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 2.25rem 2.5rem;
+    margin-bottom: 2.25rem;
+    position: relative;
+    overflow: hidden;
 }
-
-.playlist-title {
-    font-size: 1.8rem;
-    font-weight: 700;
-    color: #ffffff;
-    margin-bottom: 0.25rem;
+.playlist-header::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(120deg, rgba(29,185,84,0.03) 0%, transparent 50%);
+    pointer-events: none;
 }
-
-.playlist-desc {
-    font-size: 0.95rem;
-    color: #888;
-    margin-bottom: 1rem;
-}
-
-.playlist-meta {
-    font-size: 0.8rem;
-    color: #1DB954;
+.pl-eyebrow {
+    font-size: 0.62rem;
     font-weight: 600;
-    letter-spacing: 0.1em;
+    color: var(--green);
     text-transform: uppercase;
-}
-
-.section-label {
-    font-size: 0.65rem;
-    font-weight: 700;
-    color: #1DB954;
-    text-transform: uppercase;
-    letter-spacing: 0.15em;
+    letter-spacing: 0.18em;
     margin-bottom: 0.75rem;
 }
-
-.user-badge {
-    background: #141414;
-    border: 1px solid #222;
-    border-radius: 50px;
-    padding: 0.5rem 1rem;
-    font-size: 0.85rem;
-    color: #aaa;
-    display: inline-block;
+.pl-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-bottom: 0.5rem;
+}
+.pl-desc {
+    font-size: 0.8125rem;
+    color: var(--text-2);
+    line-height: 1.7;
+    max-width: 600px;
+}
+.pl-stat-row {
+    display: flex;
+    gap: 2rem;
+    margin-top: 1.25rem;
+}
+.pl-stat-val {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+}
+.pl-stat-label {
+    font-size: 0.6rem;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-top: 2px;
 }
 
-.pref-card {
-    background: #141414;
-    border: 1px solid #1e1e1e;
-    border-radius: 12px;
+/* ── Section label ── */
+.label {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    margin-bottom: 1.25rem;
+}
+
+/* ── User pill ── */
+.user-pill {
+    font-size: 0.75rem;
+    color: var(--text-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.3rem 0.75rem;
+    display: inline-block;
+    margin-top: 1rem;
+}
+
+/* ── Pref surface ── */
+.pref-surface {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
     padding: 1.5rem;
     margin-bottom: 1rem;
 }
 
-hr { border-color: #1e1e1e !important; margin: 2rem 0 !important; }
-
-.stButton > button {
-    background: #1DB954 !important;
-    color: #000 !important;
-    border: none !important;
-    border-radius: 50px !important;
-    font-weight: 700 !important;
-    font-size: 0.9rem !important;
-    padding: 0.6rem 2rem !important;
+/* ── Export sidebar ── */
+.export-sidebar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.5rem;
+}
+.export-count {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 3rem;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.05em;
+    line-height: 1;
+}
+.export-count-label {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-3);
+    margin-top: 4px;
+    margin-bottom: 1.5rem;
+}
+.export-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-top: 1px solid var(--border);
+}
+.export-stat-key {
+    font-size: 0.65rem;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.export-stat-val {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.8rem;
+    color: var(--text-2);
+    font-weight: 600;
+}
+.export-note {
+    font-size: 0.65rem;
+    color: var(--text-3);
+    line-height: 1.8;
+    margin-top: 1rem;
 }
 
+/* ── Divider ── */
+hr {
+    border: none !important;
+    border-top: 1px solid var(--border) !important;
+    margin: 2.25rem 0 !important;
+}
+
+/* ── Landing feature card ── */
+.feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.75rem;
+    margin-top: 2rem;
+}
+.feature-card-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.01em;
+    margin-bottom: 1rem;
+}
+.how-step {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 0.65rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.how-step:last-child { border-bottom: none; }
+.how-step-num {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: var(--green);
+    letter-spacing: 0.1em;
+    min-width: 18px;
+    padding-top: 2px;
+}
+.how-step-text { font-size: 0.78rem; color: var(--text-3); line-height: 1.5; }
+
+/* ── Streamlit overrides ── */
+.stButton > button {
+    background: var(--green) !important;
+    color: #000 !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-weight: 600 !important;
+    font-size: 0.8125rem !important;
+    padding: 0.6rem 1.5rem !important;
+    letter-spacing: 0.01em !important;
+    font-family: 'DM Sans', sans-serif !important;
+    transition: opacity 0.12s !important;
+}
 .stButton > button:hover {
-    background: #1ed760 !important;
+    opacity: 0.88 !important;
+    border: none !important;
 }
 
 .stTextInput > div > div > input {
-    background: #141414 !important;
-    border: 1px solid #2a2a2a !important;
-    border-radius: 8px !important;
-    color: #ffffff !important;
-    font-size: 0.95rem !important;
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
+    color: var(--text) !important;
+    font-size: 0.8125rem !important;
+    font-family: 'DM Sans', sans-serif !important;
 }
+.stTextInput > div > div > input:focus {
+    border-color: var(--border-hi) !important;
+    box-shadow: none !important;
+}
+.stTextInput > div > div > input::placeholder { color: var(--text-3) !important; }
 
 .stSelectbox > div > div {
-    background: #141414 !important;
-    border: 1px solid #2a2a2a !important;
-    border-radius: 8px !important;
-    color: #ffffff !important;
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
+    color: var(--text) !important;
+    font-size: 0.8125rem !important;
 }
 
 .stMultiSelect > div {
-    background: #141414 !important;
-    border: 1px solid #2a2a2a !important;
-    border-radius: 8px !important;
-    color: #ffffff !important;
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
+    color: var(--text) !important;
+    font-size: 0.8125rem !important;
 }
+
+.stSlider > div > div > div { background: var(--green) !important; }
+.stSlider > div > div > div > div { background: var(--green) !important; }
 
 [data-testid="column"] { padding: 0 0.4rem !important; }
 </style>
@@ -242,42 +438,44 @@ if "code" in params and not is_logged_in():
 # ── Not logged in ──────────────────────────────────────────────────────────
 if not is_logged_in():
     st.markdown('<h1>Musara</h1>', unsafe_allow_html=True)
-    st.markdown('<h3>Your mood. Your music. Curated by AI.</h3>', unsafe_allow_html=True)
+    st.markdown('<h3>Playlist intelligence.</h3>', unsafe_allow_html=True)
     st.markdown('<hr>', unsafe_allow_html=True)
 
     col1, col2 = st.columns([2, 1])
     with col1:
         st.markdown("""
-        <div style="margin-top:2rem;">
-            <div style="font-size:0.65rem; font-weight:700; color:#1DB954;
-            text-transform:uppercase; letter-spacing:0.15em; margin-bottom:1rem;">
-            How it works</div>
-            <div style="font-size:1rem; color:#888; line-height:2;">
-            1 → Connect your Spotify account<br>
-            2 → Pick your current mood<br>
-            3 → Set your preferences — activity, energy, language<br>
-            4 → AI scans your playlists using real audio data<br>
-            5 → Export directly to your Spotify
-            </div>
+        <div style="font-size:0.9rem; color:#666; line-height:1.8; max-width:460px; margin-top:0.5rem;">
+            Musara analyzes your Spotify library and builds playlists calibrated
+            to your mood using real audio data — energy, valence, BPM, and
+            danceability — not genre tags.
         </div>
         """, unsafe_allow_html=True)
 
         auth_url = get_auth_url()
         st.markdown(
-            f'<a href="{auth_url}" class="spotify-btn">🎵 Connect with Spotify</a>',
+            f'<a href="{auth_url}" class="spotify-btn">Connect Spotify</a>',
             unsafe_allow_html=True
         )
 
     with col2:
         st.markdown("""
-        <div style="background:#141414; border:1px solid #222; border-radius:16px;
-        padding:2rem; margin-top:2rem; text-align:center;">
-            <div style="font-size:3rem; margin-bottom:1rem;">🎵</div>
-            <div style="font-size:1rem; font-weight:600; color:#fff; margin-bottom:0.5rem;">
-            Mood-powered playlists</div>
-            <div style="font-size:0.85rem; color:#666; line-height:1.75;">
-            Musara uses Spotify audio features — energy, valence, BPM, danceability —
-            to match tracks to your exact mood and preferences.
+        <div class="feature-card">
+            <div class="feature-card-title">How it works</div>
+            <div class="how-step">
+                <span class="how-step-num">01</span>
+                <span class="how-step-text">Connect your Spotify account</span>
+            </div>
+            <div class="how-step">
+                <span class="how-step-num">02</span>
+                <span class="how-step-text">Select a mood and set preferences</span>
+            </div>
+            <div class="how-step">
+                <span class="how-step-num">03</span>
+                <span class="how-step-text">AI scores and ranks tracks from your playlists</span>
+            </div>
+            <div class="how-step">
+                <span class="how-step-num">04</span>
+                <span class="how-step-text">Save the result directly to Spotify</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -289,30 +487,29 @@ user = get_user_profile()
 col_title, col_user = st.columns([4, 1])
 with col_title:
     st.markdown('<h1>Musara</h1>', unsafe_allow_html=True)
-    st.markdown('<h3>Your mood. Your music. Curated by AI.</h3>', unsafe_allow_html=True)
+    st.markdown('<h3>Playlist intelligence.</h3>', unsafe_allow_html=True)
 with col_user:
     if user:
         st.markdown(
-            f'<div class="user-badge" style="margin-top:2rem;">👤 {user["display_name"]}</div>',
+            f'<div class="user-pill">{user["display_name"]}</div>',
             unsafe_allow_html=True
         )
-        if st.button("Log out"):
+        if st.button("Sign out"):
             logout()
             st.rerun()
 
 st.markdown('<hr>', unsafe_allow_html=True)
 
-# ── Step 1: Pick mood ──────────────────────────────────────────────────────
-st.markdown('<div class="section-label">Step 01 — How are you feeling?</div>',
-            unsafe_allow_html=True)
+# ── Step 1: Mood ───────────────────────────────────────────────────────────
+st.markdown('<div class="label">Mood</div>', unsafe_allow_html=True)
 
 MOODS = [
-    {"emoji": "🔥", "label": "Hype",      "desc": "High energy, pumped up"},
-    {"emoji": "😌", "label": "Chill",     "desc": "Relaxed, laid back"},
-    {"emoji": "🧠", "label": "Focus",     "desc": "Deep work, concentration"},
-    {"emoji": "💔", "label": "Sad",       "desc": "Melancholic, reflective"},
-    {"emoji": "🌅", "label": "Nostalgic", "desc": "Warm memories, throwbacks"},
-    {"emoji": "💜", "label": "Romantic",  "desc": "Love, soft energy"},
+    {"label": "Hype",      "display": "Energized",   "desc": "High-intensity, driven"},
+    {"label": "Chill",     "display": "Unwinding",    "desc": "Low tempo, relaxed"},
+    {"label": "Focus",     "display": "Focused",      "desc": "Deep concentration"},
+    {"label": "Sad",       "display": "Reflective",   "desc": "Introspective, melancholic"},
+    {"label": "Nostalgic", "display": "Nostalgic",    "desc": "Memory-forward warmth"},
+    {"label": "Romantic",  "display": "Romantic",     "desc": "Soft, intimate energy"},
 ]
 
 if "selected_mood" not in st.session_state:
@@ -325,21 +522,19 @@ for i, mood in enumerate(MOODS):
         card_class = "mood-card-selected" if is_selected else "mood-card"
         st.markdown(
             f'<div class="{card_class}">'
-            f'<div class="mood-emoji">{mood["emoji"]}</div>'
-            f'<div class="mood-label">{mood["label"]}</div>'
-            f'<div style="font-size:0.72rem; color:#666; margin-top:0.25rem;">'
-            f'{mood["desc"]}</div>'
+            f'<div class="mood-name">{mood["display"]}</div>'
+            f'<div class="mood-sub">{mood["desc"]}</div>'
             f'</div>',
             unsafe_allow_html=True
         )
-        if st.button(mood["label"], key=f"mood_{i}"):
+        if st.button(mood["display"], key=f"mood_{i}"):
             st.session_state["selected_mood"] = mood["label"]
             st.rerun()
 
 st.markdown('<br>', unsafe_allow_html=True)
 custom_mood = st.text_input(
-    "Or describe your mood in your own words",
-    placeholder="e.g. driving at night feeling reflective, pre-game hype, Sunday morning coffee..."
+    "Or describe your current state of mind",
+    placeholder="Late-night drive, pre-match warmup, slow Sunday morning..."
 )
 
 active_mood = custom_mood.strip() if custom_mood.strip() else st.session_state.get("selected_mood")
@@ -347,30 +542,29 @@ active_mood = custom_mood.strip() if custom_mood.strip() else st.session_state.g
 st.markdown('<hr>', unsafe_allow_html=True)
 
 # ── Step 2: Preferences ────────────────────────────────────────────────────
-st.markdown('<div class="section-label">Step 02 — Set your preferences</div>',
-            unsafe_allow_html=True)
+st.markdown('<div class="label">Preferences</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="pref-card">', unsafe_allow_html=True)
+st.markdown('<div class="pref-surface">', unsafe_allow_html=True)
 
 pref_col1, pref_col2 = st.columns(2)
 
 with pref_col1:
     activity = st.selectbox(
-        "What are you doing?",
+        "Current activity",
         options=["", "Driving", "Working out / Gym", "Studying / Focus",
                  "Party / Going out", "Cooking", "Relaxing at home",
                  "Running", "Working", "Getting ready"],
         index=0
     )
     language = st.selectbox(
-        "Language preference",
+        "Language",
         options=["No preference", "Spanish", "English",
                  "Mixed (Spanish + English)", "Portuguese", "French"],
         index=0
     )
     include_artists = st.text_input(
-        "Artists to prioritize",
-        placeholder="e.g. Bad Bunny, J Balvin, Drake"
+        "Featured artists",
+        placeholder="Frank Ocean, Bon Iver, Rex Orange County"
     )
 
 with pref_col2:
@@ -381,24 +575,25 @@ with pref_col2:
         value=5
     )
     energy_label = (
-        "🔇 Very calm"    if energy <= 2 else
-        "🎵 Laid back"    if energy <= 4 else
-        "🎶 Moderate"     if energy <= 6 else
-        "🔥 High energy"  if energy <= 8 else
-        "⚡ Maximum energy"
+        "Very calm"      if energy <= 2 else
+        "Calm"           if energy <= 4 else
+        "Moderate"       if energy <= 6 else
+        "High"           if energy <= 8 else
+        "Peak"
     )
     st.markdown(
-        f'<div style="font-size:0.75rem; color:#555; margin-top:-0.5rem; '
-        f'margin-bottom:1rem;">{energy_label}</div>',
+        f'<div style="font-size:0.7rem; color:var(--text-3); margin-top:-0.5rem; '
+        f'margin-bottom:1rem; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">'
+        f'{energy_label}</div>',
         unsafe_allow_html=True
     )
     exclude_artists = st.text_input(
-        "Artists to exclude",
-        placeholder="e.g. Reggaeton artists, EDM"
+        "Excluded artists",
+        placeholder="Leave blank to include all"
     )
     extra_prefs = st.text_input(
-        "Anything else?",
-        placeholder="e.g. only 2000s throwbacks, no explicit lyrics..."
+        "Additional filters",
+        placeholder="No explicit content, instrumentals only..."
     )
 
 st.markdown('</div>', unsafe_allow_html=True)
@@ -414,12 +609,11 @@ preferences = {
 
 st.markdown('<hr>', unsafe_allow_html=True)
 
-# ── Step 3: Select playlists ───────────────────────────────────────────────
-st.markdown('<div class="section-label">Step 03 — Choose playlists to pull from</div>',
-            unsafe_allow_html=True)
+# ── Step 3: Source playlists ───────────────────────────────────────────────
+st.markdown('<div class="label">Source playlists</div>', unsafe_allow_html=True)
 
 if "playlists" not in st.session_state:
-    with st.spinner("Loading your playlists..."):
+    with st.spinner("Loading playlists..."):
         st.session_state["playlists"] = get_all_playlists()
 
 playlists = st.session_state["playlists"]
@@ -431,10 +625,10 @@ if not playlists:
 playlist_options = {p["name"]: p["id"] for p in playlists}
 
 selected_names = st.multiselect(
-    "Select playlists",
+    "Select playlists to pull tracks from",
     options=list(playlist_options.keys()),
     default=None,
-    placeholder="Choose your playlists...",
+    placeholder="Choose playlists...",
     help="Select playlists you created in Spotify"
 )
 
@@ -442,21 +636,20 @@ selected_ids = [playlist_options[name] for name in selected_names] if selected_n
 
 st.markdown('<hr>', unsafe_allow_html=True)
 
-# ── Step 4: Build ──────────────────────────────────────────────────────────
-st.markdown('<div class="section-label">Step 04 — Build your playlist</div>',
-            unsafe_allow_html=True)
+# ── Step 4: Generate ───────────────────────────────────────────────────────
+st.markdown('<div class="label">Generate</div>', unsafe_allow_html=True)
 
-build_btn = st.button("✨ Build Mood Playlist", type="primary")
+build_btn = st.button("Generate Playlist", type="primary")
 
 if build_btn:
     if not active_mood:
-        st.warning("Please select or type a mood first.")
+        st.warning("Select or describe a mood first.")
         st.stop()
     if not selected_ids:
-        st.warning("Please select at least one playlist.")
+        st.warning("Select at least one playlist.")
         st.stop()
 
-    with st.spinner("Pulling tracks from your playlists..."):
+    with st.spinner("Pulling tracks..."):
         sp = get_spotify_client()
         all_tracks = []
         seen_ids = set()
@@ -501,7 +694,7 @@ if build_btn:
     with st.spinner(f"Analyzing audio features for {len(all_tracks)} tracks..."):
         all_tracks = enrich_tracks_with_audio_features(all_tracks)
 
-    with st.spinner("Claude is curating your playlist..."):
+    with st.spinner("Curating your playlist..."):
         result = build_mood_playlist(all_tracks, active_mood, preferences=preferences)
 
     selected_indices = result.get("selected_indices", [])
@@ -528,13 +721,26 @@ if st.session_state.get("playlist_built"):
     mood_summary    = st.session_state["mood_summary"]
     active_mood     = st.session_state["active_mood"]
 
+    # Compute avg stats
+    energies  = [t.get("energy") for t in playlist_tracks if t.get("energy") is not None]
+    valences  = [t.get("valence") for t in playlist_tracks if t.get("valence") is not None]
+    tempos    = [t.get("tempo") for t in playlist_tracks if t.get("tempo") is not None]
+    avg_e = f"{sum(energies)/len(energies):.2f}" if energies else "—"
+    avg_v = f"{sum(valences)/len(valences):.2f}" if valences else "—"
+    avg_t = f"{int(sum(tempos)/len(tempos))}" if tempos else "—"
+
     st.markdown(
         f'<div class="playlist-header">'
-        f'<div class="playlist-meta">Generated playlist · {active_mood}</div>'
-        f'<div class="playlist-title">{playlist_name}</div>'
-        f'<div class="playlist-desc">{playlist_desc}</div>'
-        f'<div style="font-size:0.85rem; color:#aaa; line-height:1.75;">'
-        f'{mood_summary}</div>'
+        f'<div class="pl-eyebrow">{active_mood}</div>'
+        f'<div class="pl-title">{playlist_name}</div>'
+        f'<div class="pl-desc">{playlist_desc}</div>'
+        f'<div class="pl-desc" style="margin-top:0.5rem;">{mood_summary}</div>'
+        f'<div class="pl-stat-row">'
+        f'<div><div class="pl-stat-val">{len(playlist_tracks)}</div><div class="pl-stat-label">Tracks</div></div>'
+        f'<div><div class="pl-stat-val">{avg_e}</div><div class="pl-stat-label">Avg Energy</div></div>'
+        f'<div><div class="pl-stat-val">{avg_v}</div><div class="pl-stat-label">Avg Valence</div></div>'
+        f'<div><div class="pl-stat-val">{avg_t}</div><div class="pl-stat-label">Avg BPM</div></div>'
+        f'</div>'
         f'</div>',
         unsafe_allow_html=True
     )
@@ -542,54 +748,57 @@ if st.session_state.get("playlist_built"):
     col_tracks, col_actions = st.columns([3, 1])
 
     with col_tracks:
-        st.markdown('<div class="section-label">Tracks</div>', unsafe_allow_html=True)
+        st.markdown('<div class="label">Tracks</div>', unsafe_allow_html=True)
         for i, track in enumerate(playlist_tracks):
             img_html = ""
             if track.get("image"):
                 img_html = (
-                    f'<img src="{track["image"]}" width="40" height="40" '
-                    f'style="border-radius:4px; flex-shrink:0;"/>'
+                    f'<img src="{track["image"]}" width="36" height="36" '
+                    f'style="border-radius:4px; flex-shrink:0; object-fit:cover; border:1px solid #191919;"/>'
                 )
+            else:
+                img_html = '<div style="width:36px;height:36px;border-radius:4px;background:#141414;border:1px solid #191919;flex-shrink:0;"></div>'
 
-            energy_val   = track.get("energy")
-            valence_val  = track.get("valence")
-            bpm_val      = track.get("tempo")
+            energy_val  = track.get("energy")
+            valence_val = track.get("valence")
+            bpm_val     = track.get("tempo")
 
-            audio_html = ""
+            tags_html = ""
             if energy_val is not None:
-                e_class = "high" if energy_val > 0.7 else "mid" if energy_val > 0.4 else "low"
-                v_class = "high" if valence_val > 0.6 else "mid" if valence_val > 0.3 else "low"
-                audio_html = (
-                    f'<div class="audio-bar">'
-                    f'<span class="audio-tag {e_class}">⚡{energy_val}</span>'
-                    f'<span class="audio-tag {v_class}">♡{valence_val}</span>'
-                    f'<span class="audio-tag mid">♩{bpm_val}bpm</span>'
+                e_class = "tag" if energy_val <= 0.4 else ("tag tag-hi" if energy_val > 0.7 else "tag")
+                v_class = "tag tag-hi" if valence_val > 0.6 else "tag"
+                tags_html = (
+                    f'<div class="track-tags">'
+                    f'<span class="{e_class}">{energy_val:.2f} E</span>'
+                    f'<span class="{v_class}">{valence_val:.2f} V</span>'
+                    f'<span class="tag">{int(bpm_val)} BPM</span>'
                     f'</div>'
                 )
 
             st.markdown(
-                f'<div class="track-card">'
+                f'<div class="track-row">'
+                f'<div class="track-idx">{i+1}</div>'
                 f'{img_html}'
-                f'<div class="track-num">{i+1}</div>'
-                f'<div style="flex:1;">'
+                f'<div style="min-width:0;">'
                 f'<div class="track-name">{track["name"]}</div>'
-                f'<div class="track-artist">{track["artist"]} · {track["album"]}</div>'
-                f'{audio_html}'
+                f'<div class="track-meta">{track["artist"]} — {track["album"]}</div>'
                 f'</div>'
+                f'{tags_html}'
                 f'</div>',
                 unsafe_allow_html=True
             )
 
     with col_actions:
-        st.markdown('<div class="section-label">Export</div>', unsafe_allow_html=True)
         st.markdown(
-            f'<div style="font-size:0.85rem; color:#888; margin-bottom:1rem; line-height:1.75;">'
-            f'{len(playlist_tracks)} tracks curated using real audio data.</div>',
+            f'<div class="export-sidebar">'
+            f'<div class="label">Export</div>'
+            f'<div class="export-count">{len(playlist_tracks)}</div>'
+            f'<div class="export-count-label">Tracks selected</div>',
             unsafe_allow_html=True
         )
 
-        if st.button("🎵 Export to Spotify"):
-            with st.spinner("Creating playlist in Spotify..."):
+        if st.button("Save to Spotify"):
+            with st.spinner("Creating playlist..."):
                 track_uris = [t["uri"] for t in playlist_tracks]
                 exported = create_spotify_playlist(
                     name=playlist_name,
@@ -597,19 +806,23 @@ if st.session_state.get("playlist_built"):
                     track_uris=track_uris
                 )
             if exported:
-                st.success("Playlist created!")
+                st.success("Playlist saved.")
                 st.markdown(
                     f'<a href="{exported["url"]}" target="_blank" class="spotify-btn">'
-                    f'▶ Open in Spotify</a>',
+                    f'Open in Spotify</a>',
                     unsafe_allow_html=True
                 )
             else:
-                st.error("Something went wrong exporting.")
+                st.error("Export failed. Please try again.")
 
-        st.markdown('<br>', unsafe_allow_html=True)
         st.markdown(
-            '<div style="font-size:0.75rem; color:#333; line-height:1.75;">'
-            'Each track shows energy ⚡, mood ♡, and BPM ♩ — '
-            'pulled directly from Spotify audio analysis.</div>',
+            f'<div class="export-stat-row"><span class="export-stat-key">Avg Energy</span>'
+            f'<span class="export-stat-val">{avg_e}</span></div>'
+            f'<div class="export-stat-row"><span class="export-stat-key">Avg Valence</span>'
+            f'<span class="export-stat-val">{avg_v}</span></div>'
+            f'<div class="export-stat-row"><span class="export-stat-key">Avg BPM</span>'
+            f'<span class="export-stat-val">{avg_t}</span></div>'
+            f'<div class="export-note">E = Energy · V = Valence<br>Source: Spotify Audio Analysis API</div>'
+            f'</div>',
             unsafe_allow_html=True
         )
