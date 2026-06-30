@@ -29,8 +29,8 @@ def get_all_playlists():
                 owner_id = item.get("owner", {}).get("id", "")
                 if owner_id == user_id:
                     playlists.append({
-                        "id": item["id"],
-                        "name": item["name"],
+                        "id":    item["id"],
+                        "name":  item["name"],
                         "image": item["images"][0]["url"] if item["images"] else None,
                         "owner": item["owner"]["display_name"]
                     })
@@ -49,7 +49,6 @@ def enrich_tracks_with_audio_features(tracks):
         return tracks
     track_ids = [t["id"] for t in tracks]
     features_map = {}
-    # fetch in batches of 100 (Spotify limit)
     for i in range(0, len(track_ids), 100):
         batch = track_ids[i:i+100]
         try:
@@ -69,19 +68,47 @@ def enrich_tracks_with_audio_features(tracks):
                         }
         except Exception:
             continue
-    # merge features into tracks
     enriched = []
     for track in tracks:
         t = track.copy()
         f = features_map.get(track["id"], {})
-        t["energy"]           = f.get("energy", None)
-        t["valence"]          = f.get("valence", None)
-        t["danceability"]     = f.get("danceability", None)
-        t["tempo"]            = f.get("tempo", None)
-        t["acousticness"]     = f.get("acousticness", None)
-        t["instrumentalness"] = f.get("instrumentalness", None)
-        t["loudness"]         = f.get("loudness", None)
-        t["speechiness"]      = f.get("speechiness", None)
+        t["energy"]           = f.get("energy")
+        t["valence"]          = f.get("valence")
+        t["danceability"]     = f.get("danceability")
+        t["tempo"]            = f.get("tempo")
+        t["acousticness"]     = f.get("acousticness")
+        t["instrumentalness"] = f.get("instrumentalness")
+        t["loudness"]         = f.get("loudness")
+        t["speechiness"]      = f.get("speechiness")
+        enriched.append(t)
+    return enriched
+
+def enrich_tracks_with_genres(tracks):
+    sp = get_spotify_client()
+    if not sp or not tracks:
+        return tracks
+    artist_ids = list({
+        t.get("artist_id")
+        for t in tracks
+        if t.get("artist_id")
+    })
+    genres_map = {}
+    for i in range(0, len(artist_ids), 50):
+        batch = [aid for aid in artist_ids[i:i+50] if aid]
+        if not batch:
+            continue
+        try:
+            result = sp.artists(batch)
+            for artist in result.get("artists", []):
+                if artist:
+                    genres_map[artist["id"]] = artist.get("genres", [])
+        except Exception:
+            continue
+    enriched = []
+    for track in tracks:
+        t = track.copy()
+        aid = t.get("artist_id")
+        t["genres"] = genres_map.get(aid, [])
         enriched.append(t)
     return enriched
 
@@ -102,7 +129,7 @@ def create_spotify_playlist(name, description, track_uris):
         batch = track_uris[i:i+100]
         sp.playlist_add_items(playlist_id, batch)
     return {
-        "id": playlist_id,
-        "url": playlist["external_urls"]["spotify"],
+        "id":   playlist_id,
+        "url":  playlist["external_urls"]["spotify"],
         "name": name
     }
