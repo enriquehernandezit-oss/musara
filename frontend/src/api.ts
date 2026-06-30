@@ -1,6 +1,8 @@
+/// <reference types="./vite-env" />
+
 // In production (Railway) set VITE_API_URL to your backend Railway URL.
 // In local dev the Vite proxy rewrites /api → http://localhost:8000, so no env var needed.
-const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
+const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 // ── Types (mirror backend models) ─────────────────────────────────────────────
 
