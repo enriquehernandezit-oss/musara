@@ -18,13 +18,12 @@ const ACTIVITIES = ['','Driving','Working out / Gym','Studying / Focus','Party /
 const LANGUAGES  = ['No preference','Spanish','English','Mixed (Spanish + English)','Portuguese','French']
 
 type Phase = 'idle' | 'generating' | 'done'
-function avg(arr: (number|undefined)[]): string {
-  const v = arr.filter((x): x is number => x != null)
-  return v.length ? (v.reduce((a,b)=>a+b,0)/v.length).toFixed(2) : '—'
-}
-function avgInt(arr: (number|undefined)[]): string {
-  const v = arr.filter((x): x is number => x != null)
-  return v.length ? String(Math.round(v.reduce((a,b)=>a+b,0)/v.length)) : '—'
+
+function topGenres(tracks: Track[], n = 3): string[] {
+  const freq: Record<string, number> = {}
+  for (const t of tracks)
+    for (const g of t.genres) freq[g] = (freq[g] ?? 0) + 1
+  return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, n).map(([g]) => g)
 }
 
 function Nav({ onLogout }: { onLogout: () => void }) {
@@ -95,7 +94,7 @@ export default function Build() {
       language: language === 'No preference' ? '' : language,
       include_artists: includeArt, exclude_artists: excludeArt, extra,
     }
-    const steps = ['Pulling tracks…','Analyzing audio features…','Fetching genre data…','Curating your playlist…']
+    const steps = ['Pulling tracks…','Fetching genre data…','Sending to Claude…','Curating your playlist…']
     let idx = 0; setStatusMsg(steps[0])
     const ticker = setInterval(() => { idx = Math.min(idx+1,steps.length-1); setStatusMsg(steps[idx]) }, 3500)
     try {
@@ -298,10 +297,24 @@ export default function Build() {
 function Results({ result, activeMood, exporting, exportUrl, onExport }: {
   result: PlaylistResult; activeMood: string; exporting: boolean; exportUrl: string|null; onExport: ()=>void
 }) {
-  const tracks = result.tracks
-  const avgE   = avg(tracks.map(t=>t.energy))
-  const avgV   = avg(tracks.map(t=>t.valence))
-  const avgBpm = avgInt(tracks.map(t=>t.tempo))
+  const tracks        = result.tracks
+  const uniqueArtists = new Set(tracks.map(t => t.artist)).size
+  const explicitCount = tracks.filter(t => t.explicit).length
+  const genres        = topGenres(tracks, 3)
+  const avgPop        = Math.round(tracks.reduce((s, t) => s + t.popularity, 0) / (tracks.length || 1))
+
+  const headerStats: [string, string][] = [
+    ['Tracks',   String(tracks.length)],
+    ['Artists',  String(uniqueArtists)],
+    ['Explicit', String(explicitCount)],
+    ['Avg Pop',  String(avgPop)],
+  ]
+
+  const sideStats: [string, string][] = [
+    ['Artists',  String(uniqueArtists)],
+    ['Explicit', `${explicitCount} tracks`],
+    ['Top genre', genres[0] ?? '—'],
+  ]
 
   return (
     <section>
@@ -310,9 +323,22 @@ function Results({ result, activeMood, exporting, exportUrl, onExport }: {
         <div className="pl-title">{result.playlist_name.toUpperCase()}</div>
         <p className="pl-desc">{result.playlist_description}</p>
         {result.mood_summary && <p className="pl-desc" style={{marginTop:'0.5rem'}}>{result.mood_summary}</p>}
+
+        {/* Genre tags */}
+        {genres.length > 0 && (
+          <div style={{display:'flex', gap:'0.375rem', marginTop:'1rem', flexWrap:'wrap'}}>
+            {genres.map(g => (
+              <span key={g} className="tag tag-green" style={{fontSize:'0.65rem'}}>{g}</span>
+            ))}
+          </div>
+        )}
+
         <div className="pl-stats">
-          {[['Tracks',String(tracks.length)],['Avg Energy',avgE],['Avg Valence',avgV],['Avg BPM',avgBpm]].map(([k,v])=>(
-            <div key={k}><div className="pl-stat-val">{v}</div><div className="pl-stat-key">{k}</div></div>
+          {headerStats.map(([k, v]) => (
+            <div key={k}>
+              <div className="pl-stat-val">{v}</div>
+              <div className="pl-stat-key">{k}</div>
+            </div>
           ))}
         </div>
       </div>
@@ -322,9 +348,9 @@ function Results({ result, activeMood, exporting, exportUrl, onExport }: {
           <div className="track-header">
             <span className="track-header-label">#</span>
             <span className="track-header-label">Title</span>
-            <span className="track-header-label">Signals</span>
+            <span className="track-header-label">Genre</span>
           </div>
-          {tracks.map((track,i) => <TrackRow key={track.id} track={track} index={i} />)}
+          {tracks.map((track, i) => <TrackRow key={track.id} track={track} index={i} />)}
         </div>
 
         <div>
@@ -334,23 +360,27 @@ function Results({ result, activeMood, exporting, exportUrl, onExport }: {
               <div className="export-count-label">Tracks selected</div>
             </div>
             <div className="export-stats">
-              {[['Avg Energy',avgE],['Avg Valence',avgV],['Avg BPM',avgBpm]].map(([k,v])=>(
+              {sideStats.map(([k, v]) => (
                 <div className="export-stat-row" key={k}>
                   <span className="export-stat-key">{k}</span>
                   <span className="export-stat-val">{v}</span>
                 </div>
               ))}
             </div>
+
             {exportUrl ? (
               <a href={exportUrl} target="_blank" rel="noreferrer" className="btn btn-primary w-full" style={{justifyContent:'center'}}>
                 Open in Spotify ↗
               </a>
             ) : (
               <button className="btn btn-primary w-full" style={{justifyContent:'center'}} onClick={onExport} disabled={exporting}>
-                {exporting ? <><div className="spinner" style={{width:14,height:14,borderWidth:1.5}} /> Saving…</> : 'Save to Spotify'}
+                {exporting
+                  ? <><div className="spinner" style={{width:14,height:14,borderWidth:1.5}} /> Saving…</>
+                  : 'Save to Spotify'}
               </button>
             )}
-            <p className="export-note">E = Energy · V = Valence<br/>Data via Spotify Audio Features API</p>
+
+            <p className="export-note">Curated by Claude<br/>Genre data via Spotify Artists API</p>
           </div>
         </div>
       </div>
@@ -359,13 +389,14 @@ function Results({ result, activeMood, exporting, exportUrl, onExport }: {
 }
 
 function TrackRow({ track, index }: { track: Track; index: number }) {
-  const has = track.energy != null
+  const genre = track.genres[0] ?? null
   return (
     <div className="track-row">
       <div className="track-num-wrap">
-        <span className="track-num">{String(index+1).padStart(2,'0')}</span>
+        <span className="track-num">{String(index + 1).padStart(2, '0')}</span>
         <span className="track-play">▶</span>
       </div>
+
       <div className="track-info">
         {track.image
           ? <img src={track.image} alt={track.album} className="track-thumb" />
@@ -375,13 +406,11 @@ function TrackRow({ track, index }: { track: Track; index: number }) {
           <div className="track-artist">{track.artist} — {track.album}</div>
         </div>
       </div>
-      {has && (
-        <div className="track-tags">
-          <span className={`tag${(track.energy??0)>0.7?' tag-green':''}`}>{track.energy!.toFixed(2)} E</span>
-          <span className={`tag${(track.valence??0)>0.6?' tag-green':''}`}>{track.valence!.toFixed(2)} V</span>
-          <span className="tag">{Math.round(track.tempo??0)} BPM</span>
-        </div>
-      )}
+
+      <div className="track-tags">
+        {track.explicit && <span className="tag" style={{color:'var(--text-3)',fontWeight:600}}>E</span>}
+        {genre && <span className="tag">{genre}</span>}
+      </div>
     </div>
   )
 }

@@ -152,8 +152,9 @@ def generate(
     if not tracks:
         raise HTTPException(status_code=404, detail="No tracks found in the selected playlists")
 
-    # 2. Enrich with audio features + genres
-    tracks = sp_api.enrich_with_audio_features(sp, tracks)
+    print(f"[generate] fetched {len(tracks)} tracks, enriching...", flush=True)
+
+    # 2. Enrich with genres (audio features skipped — deprecated for new Spotify apps)
     tracks = sp_api.enrich_with_genres(sp, tracks)
 
     # 3. Claude curation
@@ -179,6 +180,21 @@ def export(
     except spotipy.SpotifyException as exc:
         raise HTTPException(status_code=exc.http_status or 502, detail=str(exc))
     return ExportResult(**result)
+
+
+# ── Debug ─────────────────────────────────────────────────────────────────────
+
+@app.get("/debug/audio-features")
+def debug_audio_features(
+    track_id: str = "3n3Ppam7vgaVa1iaRUIOKE",  # default: Mr. Brightside
+    sp: spotipy.Spotify = Depends(get_spotify),
+) -> dict:
+    """
+    Hit audio-features for one track and return the raw result.
+    Use this to verify whether your Spotify app can access the endpoint.
+    GET /debug/audio-features?track_id=<spotify_track_id>
+    """
+    return sp_api.probe_audio_features(sp, track_id)
 
 
 # ── Dev entry point ───────────────────────────────────────────────────────────

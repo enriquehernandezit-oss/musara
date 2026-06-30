@@ -100,9 +100,17 @@ def fetch_tracks_from_playlists(
 
 # ── Audio features ────────────────────────────────────────────────────────────
 
-def enrich_with_audio_features(sp: spotipy.Spotify, tracks: list[Track]) -> list[Track]:
+def enrich_with_audio_features(
+    sp: spotipy.Spotify,
+    tracks: list[Track],
+) -> tuple[list[Track], str | None]:
+    """
+    Returns (enriched_tracks, error_message).
+    error_message is None on success, a human-readable string if the API call failed.
+    """
     ids = [t.id for t in tracks]
     features_map: dict[str, dict] = {}
+    last_error: str | None = None
 
     for i in range(0, len(ids), 100):
         batch = ids[i:i + 100]
@@ -121,8 +129,39 @@ def enrich_with_audio_features(sp: spotipy.Spotify, tracks: list[Track]) -> list
                             "loudness":         round(f.get("loudness",         0), 1),
                             "speechiness":      round(f.get("speechiness",      0), 2),
                         }
-        except Exception:
+            else:
+                last_error = "Spotify returned an empty audio-features response"
+                print(f"[audio_features] empty response for batch {i//100}", flush=True)
+        except Exception as e:
+            last_error = str(e)
+            print(f"[audio_features] error on batch {i//100}: {e}", flush=True)
             continue
+
+    print(f"[audio_features] populated features for {len(features_map)}/{len(ids)} tracks", flush=True)
+
+    enriched: list[Track] = []
+    for t in tracks:
+        f = features_map.get(t.id, {})
+        enriched.append(t.model_copy(update={
+            "energy":           f.get("energy"),
+            "valence":          f.get("valence"),
+            "danceability":     f.get("danceability"),
+            "tempo":            f.get("tempo"),
+            "acousticness":     f.get("acousticness"),
+            "instrumentalness": f.get("instrumentalness"),
+            "loudness":         f.get("loudness"),
+            "speechiness":      f.get("speechiness"),
+        }))
+    return enriched, last_error if not features_map else None
+
+
+def probe_audio_features(sp: spotipy.Spotify, track_id: str) -> dict:
+    """Hit the API with a single track and return the raw result — for debugging."""
+    try:
+        result = sp.audio_features([track_id])
+        return {"ok": True, "result": result}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "type": type(e).__name__}
 
     enriched: list[Track] = []
     for t in tracks:

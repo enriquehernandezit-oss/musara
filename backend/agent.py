@@ -1,7 +1,12 @@
 """
-Claude-powered curation logic — no Streamlit, no session state.
-Identical scoring/ordering to the original, adapted to work with
-Pydantic Track objects instead of plain dicts.
+Claude-powered curation logic.
+
+Since Spotify's audio-features endpoint is restricted for apps created after
+Nov 27 2024, this module does NOT rely on audio features at all.
+
+Instead Claude selects and ranks tracks using its knowledge of songs/artists
+combined with mood, preferences, and genre metadata from the Spotify Artists API
+(which is still available).
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ load_dotenv()
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL  = "claude-haiku-4-5-20251001"
 
-# ── Language / genre maps (unchanged) ────────────────────────────────────────
+# ── Language / genre filtering (works without audio features) ─────────────────
 
 LANGUAGE_GENRE_MAP = {
     "spanish": [
@@ -62,148 +67,125 @@ def _language_passes(genres: list[str], language_pref: str) -> bool:
     if "mixed" in lang or ("spanish" in lang and "english" in lang):
         return True
     if "spanish" in lang:
-        markers = LANGUAGE_GENRE_MAP["spanish"]
-        return any(any(m in g for m in markers) for g in genres_lower)
+        return any(any(m in g for m in LANGUAGE_GENRE_MAP["spanish"]) for g in genres_lower)
     if "english" in lang:
         return not any(any(m in g for m in NON_ENGLISH_MARKERS) for g in genres_lower)
     if "portuguese" in lang:
-        markers = LANGUAGE_GENRE_MAP["portuguese"]
-        return any(any(m in g for m in markers) for g in genres_lower)
+        return any(any(m in g for m in LANGUAGE_GENRE_MAP["portuguese"]) for g in genres_lower)
     if "french" in lang:
-        markers = LANGUAGE_GENRE_MAP["french"]
-        return any(any(m in g for m in markers) for g in genres_lower)
+        return any(any(m in g for m in LANGUAGE_GENRE_MAP["french"]) for g in genres_lower)
     return True
 
 
-# ── Mood → audio feature targets (Claude call) ───────────────────────────────
+# ── Hard-constraint pre-filter (no audio features needed) ────────────────────
 
-def interpret_mood(mood: str, preferences: Preferences) -> dict:
-    energy_level = int(preferences.energy) if preferences.energy else 5
-    prompt = f"""You are a music data analyst. A user wants a playlist for: "{mood}"
-
-Context:
-- Energy slider: {energy_level}/10 (1=very calm, 10=maximum energy)
-- Activity: {preferences.activity or "not specified"}
-- Extra notes: {preferences.extra or "none"}
-
-Spotify audio feature ranges:
-- energy: 0.0 (silent/ambient) → 1.0 (intense/loud/fast)
-- valence: 0.0 (sad/dark/tense) → 1.0 (happy/euphoric/bright)
-- danceability: 0.0 (not danceable) → 1.0 (very danceable)
-- tempo: BPM — 60=slow ballad, 90=mid, 120=upbeat, 150+=fast/dance
-- acousticness: 0.0 (electronic/produced) → 1.0 (acoustic/raw)
-- instrumentalness_max: max allowed instrumental ratio (0.0=needs vocals, 1.0=anything)
-- speechiness_max: max allowed speech ratio (keep low for music, high for rap/spoken)
-
-Reference calibrations:
-- Party/pregame/hype: energy 0.75-1.0, valence 0.65-1.0, dance 0.65-1.0, tempo 115-180
-- Chill/relax/lounge: energy 0.0-0.45, valence 0.3-0.75, dance 0.2-0.6, tempo 60-105
-- Sad/heartbreak/cry: energy 0.0-0.45, valence 0.0-0.38, acoustic 0.25-1.0, tempo 50-100
-- Focus/study/work: energy 0.3-0.62, valence 0.2-0.7, speech_max 0.1, tempo 70-120
-- Romantic/date/love: energy 0.1-0.55, valence 0.35-0.75, dance 0.3-0.65, tempo 60-110
-- Nostalgic/throwback: energy 0.25-0.65, valence 0.35-0.72, acoustic 0.1-0.75, tempo 70-130
-- Driving/road trip: energy 0.55-0.9, valence 0.4-0.85, tempo 100-150
-- Gym/workout: energy 0.78-1.0, valence 0.5-1.0, dance 0.55-1.0, tempo 120-180
-
-Return ONLY this JSON — be precise, not generic:
-{{
-  "energy_min": 0.0,
-  "energy_max": 1.0,
-  "valence_min": 0.0,
-  "valence_max": 1.0,
-  "danceability_min": 0.0,
-  "danceability_max": 1.0,
-  "tempo_min": 60,
-  "tempo_max": 200,
-  "acousticness_min": 0.0,
-  "acousticness_max": 1.0,
-  "instrumentalness_max": 0.6,
-  "speechiness_max": 0.5,
-  "mood_interpretation": "one sentence describing what kind of music this calls for"
-}}"""
-
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=400,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw = response.content[0].text
-    return json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
-
-
-# ── Per-track scoring ─────────────────────────────────────────────────────────
-
-def _score(track: Track, targets: dict) -> float:
-    if track.energy is None:
-        return track.popularity / 100 * 2
-
-    def range_score(val, vmin, vmax, weight):
-        if val is None:
-            return weight * 0.5
-        if vmin <= val <= vmax:
-            return weight
-        dist = min(abs(val - vmin), abs(val - vmax))
-        return max(0.0, weight - dist * weight * 3)
-
-    score = 0.0
-    score += range_score(track.energy,       targets["energy_min"],       targets["energy_max"],       4.0)
-    score += range_score(track.valence,      targets["valence_min"],      targets["valence_max"],       3.0)
-    score += range_score(track.danceability, targets["danceability_min"], targets["danceability_max"],  2.0)
-    score += range_score(track.acousticness, targets["acousticness_min"], targets["acousticness_max"],  1.0)
-    if track.tempo is not None:
-        score += range_score(track.tempo, targets["tempo_min"], targets["tempo_max"], 1.5)
-    if track.instrumentalness is not None and track.instrumentalness > targets.get("instrumentalness_max", 0.6):
-        score -= 2.0
-    if track.speechiness is not None and track.speechiness > targets.get("speechiness_max", 0.5):
-        score -= 1.5
-    score += track.popularity / 200
-    return score
-
-
-# ── Select + order tracks ─────────────────────────────────────────────────────
-
-def select_and_order(
-    tracks: list[Track],
-    targets: dict,
-    preferences: Preferences,
-    n: int = 80,
-) -> list[Track]:
+def _prefilter(tracks: list[Track], preferences: Preferences) -> list[Track]:
     include    = [a.strip().lower() for a in preferences.include_artists.split(",") if a.strip()]
     exclude    = [a.strip().lower() for a in preferences.exclude_artists.split(",") if a.strip()]
     language   = preferences.language
     extra_text = preferences.extra.lower()
     no_explicit = "explicit" in extra_text or "clean" in extra_text
 
-    scored: list[tuple[float, Track]] = []
-    for track in tracks:
-        artist_lower = track.artist.lower()
+    filtered = []
+    for t in tracks:
+        artist_lower = t.artist.lower()
         if exclude and any(ex in artist_lower for ex in exclude):
             continue
-        if no_explicit and track.explicit:
+        if no_explicit and t.explicit:
             continue
         if language and language.lower() not in ("no preference", ""):
-            if not _language_passes(track.genres, language):
+            if not _language_passes(t.genres, language):
                 continue
-        s = _score(track, targets)
-        if include and any(inc in artist_lower for inc in include):
-            s += 3.0
-        scored.append((s, track))
+        filtered.append(t)
 
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top = [t for _, t in scored[:n]]
-    if not top:
-        return tracks[:n]
+    return filtered
 
-    n3    = max(1, len(top) // 3)
-    build = sorted(top[:n3],     key=lambda t: t.energy or 0.5)
-    peak  = sorted(top[n3:2*n3], key=lambda t: -(t.energy or 0.5))
-    end   = sorted(top[2*n3:],   key=lambda t: t.energy or 0.5)
-    return build + peak + end
+
+# ── Claude: select + rank tracks by mood ─────────────────────────────────────
+
+def _claude_select(
+    tracks: list[Track],
+    mood: str,
+    preferences: Preferences,
+    n: int = 80,
+) -> tuple[list[Track], str]:
+    """
+    Ask Claude to pick and rank the best `n` tracks from `tracks` for the mood.
+    Returns (selected_tracks, mood_interpretation).
+    Falls back to popularity sort if Claude fails.
+    """
+    energy_level = int(preferences.energy) if preferences.energy else 5
+
+    # Build a compact track list for the prompt
+    # Format: INDEX | Song Name — Artist | genres
+    lines = []
+    for i, t in enumerate(tracks):
+        genre_str = ", ".join(t.genres[:4]) if t.genres else "unknown"
+        lines.append(f"{i} | {t.name} — {t.artist} | {genre_str}")
+
+    track_list = "\n".join(lines)
+
+    include_hint = ""
+    if preferences.include_artists.strip():
+        include_hint = f"\nPrioritize tracks by: {preferences.include_artists}"
+
+    prompt = f"""You are a music curator. Select the best tracks for this mood/context.
+
+Mood: "{mood}"
+Energy level: {energy_level}/10 (1=very calm, 10=maximum energy)
+Activity: {preferences.activity or "not specified"}
+Extra notes: {preferences.extra or "none"}{include_hint}
+
+Track list (index | name — artist | genres):
+{track_list}
+
+Instructions:
+- Pick the {n} tracks that best fit the mood, energy level, and activity
+- Order them for a great listening experience (build up, peak, wind down)
+- Use your knowledge of each song's actual sound and feel
+- Prefer variety over clustering the same artist repeatedly
+- If fewer than {n} tracks fit well, return only the good ones
+
+Return ONLY this JSON (no other text):
+{{
+  "indices": [0, 5, 12, ...],
+  "mood_interpretation": "one sentence describing what kind of music this calls for"
+}}"""
+
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text
+        data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+        indices = [int(i) for i in data.get("indices", []) if 0 <= int(i) < len(tracks)]
+        selected = [tracks[i] for i in indices]
+        mood_interp = data.get("mood_interpretation", "")
+
+        # If Claude returned too few, pad with popularity-sorted remainder
+        if len(selected) < min(n, len(tracks)):
+            selected_ids = {t.id for t in selected}
+            remainder = sorted(
+                [t for t in tracks if t.id not in selected_ids],
+                key=lambda t: t.popularity,
+                reverse=True,
+            )
+            selected = selected + remainder[:n - len(selected)]
+
+        return selected[:n], mood_interp
+
+    except Exception as e:
+        print(f"[claude_select] failed: {e}", flush=True)
+        # Fallback: sort by popularity
+        fallback = sorted(tracks, key=lambda t: t.popularity, reverse=True)[:n]
+        return fallback, "A curated selection for your mood."
 
 
 # ── Name the playlist ─────────────────────────────────────────────────────────
 
-def name_playlist(
+def _name_playlist(
     mood: str,
     preferences: Preferences,
     playlist_tracks: list[Track],
@@ -254,10 +236,17 @@ def build_mood_playlist(
     mood: str,
     preferences: Preferences,
 ) -> PlaylistResult:
-    targets             = interpret_mood(mood, preferences)
-    mood_interpretation = targets.get("mood_interpretation", "")
-    playlist_tracks     = select_and_order(tracks, targets, preferences, n=80)
-    naming              = name_playlist(mood, preferences, playlist_tracks, mood_interpretation)
+    # 1. Hard filters (language, explicit, excluded artists) — no audio features needed
+    filtered = _prefilter(tracks, preferences)
+    if not filtered:
+        filtered = tracks  # if all tracks were filtered out, use everything
+
+    # 2. Claude picks + ranks from the filtered pool
+    playlist_tracks, mood_interpretation = _claude_select(filtered, mood, preferences, n=80)
+
+    # 3. Name + describe the playlist
+    naming = _name_playlist(mood, preferences, playlist_tracks, mood_interpretation)
+
     return PlaylistResult(
         playlist_name=naming["playlist_name"],
         playlist_description=naming["playlist_description"],
