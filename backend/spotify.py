@@ -8,14 +8,6 @@ from concurrent.futures import ThreadPoolExecutor
 import spotipy
 from models import Track, Playlist, UserProfile
 
-# Playlist track fields we actually use — trims the JSON payload Spotify
-# sends back (and how much spotipy has to parse) versus requesting every
-# field on every track/album/artist object.
-_TRACK_FIELDS = (
-    "items(track(id,name,uri,preview_url,popularity,explicit,"
-    "artists(id,name),album(name,images))),next"
-)
-
 # In-process cache of artist_id -> genres. Genres change rarely, and the
 # same artists show up across repeat /generate calls on the same playlists
 # (e.g. regenerating with a different mood/energy) — caching avoids
@@ -68,7 +60,12 @@ def get_all_playlists(sp: spotipy.Spotify) -> list[Playlist]:
 
 def _fetch_one_playlist(sp: spotipy.Spotify, pid: str, max_per_playlist: int) -> list[Track]:
     tracks: list[Track] = []
-    results = sp.playlist_tracks(pid, limit=100, fields=_TRACK_FIELDS)
+    try:
+        results = sp.playlist_tracks(pid, limit=100)
+    except Exception as e:
+        print(f"[fetch_tracks] failed to fetch playlist {pid}: {e}", flush=True)
+        return tracks
+
     count = 0
     while results and count < max_per_playlist:
         for item in results["items"]:
@@ -96,9 +93,15 @@ def _fetch_one_playlist(sp: spotipy.Spotify, pid: str, max_per_playlist: int) ->
             ))
             count += 1
         if results["next"] and count < max_per_playlist:
-            results = sp.next(results)
+            try:
+                results = sp.next(results)
+            except Exception as e:
+                print(f"[fetch_tracks] pagination failed for playlist {pid}: {e}", flush=True)
+                break
         else:
             break
+
+    print(f"[fetch_tracks] playlist {pid}: fetched {len(tracks)} tracks", flush=True)
     return tracks
 
 
@@ -115,8 +118,9 @@ def fetch_tracks_from_playlists(
 
     Playlists are fetched concurrently (each playlist's pagination is fully
     independent, so there's no reason to wait on one before starting the
-    next) and the trimmed `fields` request cuts payload size/parse time per
-    page.
+    next). A failure on one playlist is caught and logged inside
+    `_fetch_one_playlist` rather than raised, so one bad/inaccessible
+    playlist can't wipe out tracks already fetched from the others.
     """
     tracks: list[Track] = []
     seen: set[str] = set()
