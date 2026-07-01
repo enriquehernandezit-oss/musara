@@ -50,6 +50,7 @@ ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://frontend-production-9da4.up.railway.app",
+    "https://backend-production-d382.up.railway.app",
     FRONTEND_URL,  # picks up any value set in .env
 ]
 
