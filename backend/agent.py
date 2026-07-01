@@ -167,39 +167,33 @@ Return ONLY valid JSON, no other text:
   "mood_interpretation": "one sentence on what this mood calls for musically"
 }}"""
 
-    try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = response.content[0].text
+    print(f"[claude_select] raw response: {raw[:400]}", flush=True)
+
+    data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+    indices = [int(i) for i in data.get("indices", []) if 0 <= int(i) < len(tracks)]
+    print(f"[claude_select] selected {len(indices)} tracks from {len(tracks)}", flush=True)
+
+    selected = [tracks[i] for i in indices]
+    mood_interp = data.get("mood_interpretation", "")
+
+    # Pad only if drastically short
+    min_acceptable = max(5, target // 2)
+    if len(selected) < min_acceptable:
+        selected_ids = {t.id for t in selected}
+        remainder = sorted(
+            [t for t in tracks if t.id not in selected_ids],
+            key=lambda t: t.popularity,
+            reverse=True,
         )
-        raw = response.content[0].text
-        print(f"[claude_select] raw response: {raw[:300]}", flush=True)
+        selected = selected + remainder[:target - len(selected)]
 
-        data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
-        indices = [int(i) for i in data.get("indices", []) if 0 <= int(i) < len(tracks)]
-        print(f"[claude_select] selected {len(indices)} tracks from {len(tracks)}", flush=True)
-
-        selected = [tracks[i] for i in indices]
-        mood_interp = data.get("mood_interpretation", "")
-
-        # Pad only if drastically short — prefer Claude's filtered selection
-        min_acceptable = max(5, target // 2)
-        if len(selected) < min_acceptable:
-            selected_ids = {t.id for t in selected}
-            remainder = sorted(
-                [t for t in tracks if t.id not in selected_ids],
-                key=lambda t: t.popularity,
-                reverse=True,
-            )
-            selected = selected + remainder[:target - len(selected)]
-
-        return selected[:target], mood_interp
-
-    except Exception as e:
-        print(f"[claude_select] failed: {e}", flush=True)
-        fallback = sorted(tracks, key=lambda t: t.popularity, reverse=True)[:target]
-        return fallback, "A curated selection for your mood."
+    return selected[:target], mood_interp
 
 
 # ── Name the playlist ─────────────────────────────────────────────────────────

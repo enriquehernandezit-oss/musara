@@ -205,6 +205,22 @@ def debug_audio_features(
     return sp_api.probe_audio_features(sp, track_id)
 
 
+@app.get("/debug/claude")
+def debug_claude() -> dict:
+    """Test Anthropic API key — no auth needed."""
+    try:
+        import anthropic, os
+        c = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        r = c.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=50,
+            messages=[{"role": "user", "content": "Reply with just the word WORKING"}],
+        )
+        return {"ok": True, "response": r.content[0].text}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ── Dev entry point ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
