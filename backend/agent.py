@@ -116,12 +116,14 @@ def _claude_select(
     """
     energy_level = int(preferences.energy) if preferences.energy else 5
 
-    # Build a compact track list for the prompt
-    # Format: INDEX | Song Name — Artist | genres
+    # Cap how many tracks we ask Claude to pick — always force real filtering
+    target = min(n, max(10, int(len(tracks) * 0.65)))
+
+    # Build compact track list: INDEX | Song — Artist | genres
     lines = []
     for i, t in enumerate(tracks):
-        genre_str = ", ".join(t.genres[:4]) if t.genres else "unknown"
-        lines.append(f"{i} | {t.name} — {t.artist} | {genre_str}")
+        genre_str = ", ".join(t.genres[:3]) if t.genres else ""
+        lines.append(f"{i} | {t.name} — {t.artist}{' | ' + genre_str if genre_str else ''}")
 
     track_list = "\n".join(lines)
 
@@ -129,27 +131,40 @@ def _claude_select(
     if preferences.include_artists.strip():
         include_hint = f"\nPrioritize tracks by: {preferences.include_artists}"
 
-    prompt = f"""You are a music curator. Select the best tracks for this mood/context.
+    energy_desc = (
+        "very calm and quiet" if energy_level <= 2 else
+        "calm and relaxed"    if energy_level <= 4 else
+        "moderate energy"     if energy_level <= 6 else
+        "high energy"         if energy_level <= 8 else
+        "maximum intensity"
+    )
 
-Mood: "{mood}"
-Energy level: {energy_level}/10 (1=very calm, 10=maximum energy)
-Activity: {preferences.activity or "not specified"}
-Extra notes: {preferences.extra or "none"}{include_hint}
+    prompt = f"""You are a music curator building a mood playlist. Be selective and opinionated.
 
-Track list (index | name — artist | genres):
+MOOD: "{mood}"
+ENERGY: {energy_level}/10 — {energy_desc}
+ACTIVITY: {preferences.activity or "not specified"}
+NOTES: {preferences.extra or "none"}{include_hint}
+
+TRACK POOL ({len(tracks)} tracks):
 {track_list}
 
-Instructions:
-- Pick the {n} tracks that best fit the mood, energy level, and activity
-- Order them for a great listening experience (build up, peak, wind down)
-- Use your knowledge of each song's actual sound and feel
-- Prefer variety over clustering the same artist repeatedly
-- If fewer than {n} tracks fit well, return only the good ones
+YOUR TASK:
+1. Pick EXACTLY {target} tracks that genuinely fit this mood and energy level.
+   - REJECT tracks that don't match the mood — be ruthless, not every track belongs.
+   - Use your knowledge of each song's actual sound, tempo, and emotional feel.
+   - Do NOT just keep them in the order they appear — the input order is meaningless.
 
-Return ONLY this JSON (no other text):
+2. ORDER the selected tracks intentionally:
+   - Start with tracks that ease the listener in
+   - Build to the most fitting tracks in the middle
+   - Wind down or peak at the end depending on the mood
+   - Never cluster the same artist back-to-back
+
+Return ONLY valid JSON, no other text:
 {{
-  "indices": [0, 5, 12, ...],
-  "mood_interpretation": "one sentence describing what kind of music this calls for"
+  "indices": [14, 3, 27, 8, ...],
+  "mood_interpretation": "one sentence on what this mood calls for musically"
 }}"""
 
     try:
@@ -159,27 +174,31 @@ Return ONLY this JSON (no other text):
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response.content[0].text
+        print(f"[claude_select] raw response: {raw[:300]}", flush=True)
+
         data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
         indices = [int(i) for i in data.get("indices", []) if 0 <= int(i) < len(tracks)]
+        print(f"[claude_select] selected {len(indices)} tracks from {len(tracks)}", flush=True)
+
         selected = [tracks[i] for i in indices]
         mood_interp = data.get("mood_interpretation", "")
 
-        # If Claude returned too few, pad with popularity-sorted remainder
-        if len(selected) < min(n, len(tracks)):
+        # Pad only if drastically short — prefer Claude's filtered selection
+        min_acceptable = max(5, target // 2)
+        if len(selected) < min_acceptable:
             selected_ids = {t.id for t in selected}
             remainder = sorted(
                 [t for t in tracks if t.id not in selected_ids],
                 key=lambda t: t.popularity,
                 reverse=True,
             )
-            selected = selected + remainder[:n - len(selected)]
+            selected = selected + remainder[:target - len(selected)]
 
-        return selected[:n], mood_interp
+        return selected[:target], mood_interp
 
     except Exception as e:
         print(f"[claude_select] failed: {e}", flush=True)
-        # Fallback: sort by popularity
-        fallback = sorted(tracks, key=lambda t: t.popularity, reverse=True)[:n]
+        fallback = sorted(tracks, key=lambda t: t.popularity, reverse=True)[:target]
         return fallback, "A curated selection for your mood."
 
 
