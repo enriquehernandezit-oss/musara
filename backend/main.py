@@ -51,6 +51,7 @@ ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://frontend-production-9da4.up.railway.app",
     "https://backend-production-d382.up.railway.app",
+    "https://musara.up.railway.app",
     FRONTEND_URL,  # picks up any value set in .env
 ]
 
@@ -153,7 +154,7 @@ def generate(
 
     # 1. Fetch raw tracks
     try:
-        tracks = sp_api.fetch_tracks_from_playlists(sp, body.playlist_ids, max_total=400)
+        tracks = sp_api.fetch_tracks_from_playlists(sp, body.playlist_ids, max_per_playlist=100)
     except spotipy.SpotifyException as exc:
         raise HTTPException(status_code=exc.http_status or 502, detail=str(exc))
 

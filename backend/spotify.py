@@ -4,8 +4,23 @@ Every function receives a spotipy.Spotify client (already authenticated).
 """
 
 from __future__ import annotations
+from concurrent.futures import ThreadPoolExecutor
 import spotipy
 from models import Track, Playlist, UserProfile
+
+# Playlist track fields we actually use — trims the JSON payload Spotify
+# sends back (and how much spotipy has to parse) versus requesting every
+# field on every track/album/artist object.
+_TRACK_FIELDS = (
+    "items(track(id,name,uri,preview_url,popularity,explicit,"
+    "artists(id,name),album(name,images))),next"
+)
+
+# In-process cache of artist_id -> genres. Genres change rarely, and the
+# same artists show up across repeat /generate calls on the same playlists
+# (e.g. regenerating with a different mood/energy) — caching avoids
+# re-hitting the Spotify Artists API for artists we already looked up.
+_genre_cache: dict[str, list[str]] = {}
 
 
 # ── User ──────────────────────────────────────────────────────────────────────
@@ -51,49 +66,70 @@ def get_all_playlists(sp: spotipy.Spotify) -> list[Playlist]:
 
 # ── Track fetching ────────────────────────────────────────────────────────────
 
+def _fetch_one_playlist(sp: spotipy.Spotify, pid: str, max_per_playlist: int) -> list[Track]:
+    tracks: list[Track] = []
+    results = sp.playlist_tracks(pid, limit=100, fields=_TRACK_FIELDS)
+    count = 0
+    while results and count < max_per_playlist:
+        for item in results["items"]:
+            if count >= max_per_playlist:
+                break
+            if not item:
+                continue
+            raw = item.get("track") or item.get("item")
+            if not raw or not raw.get("id"):
+                continue
+            artists = raw.get("artists") or []
+            album   = raw.get("album") or {}
+            images  = album.get("images") or []
+            tracks.append(Track(
+                id=raw["id"],
+                name=raw["name"],
+                artist=artists[0]["name"] if artists else "Unknown",
+                artist_id=artists[0]["id"] if artists else None,
+                album=album.get("name", "Unknown"),
+                image=images[0]["url"] if images else None,
+                uri=raw["uri"],
+                preview_url=raw.get("preview_url"),
+                popularity=raw.get("popularity", 0),
+                explicit=raw.get("explicit", False),
+            ))
+            count += 1
+        if results["next"] and count < max_per_playlist:
+            results = sp.next(results)
+        else:
+            break
+    return tracks
+
+
 def fetch_tracks_from_playlists(
     sp: spotipy.Spotify,
     playlist_ids: list[str],
-    max_total: int = 400,
+    max_per_playlist: int = 100,
 ) -> list[Track]:
+    """
+    Reads each playlist in full (paginating through every page Spotify has),
+    capped at `max_per_playlist` tracks per individual playlist — not a
+    combined total. Selecting several large playlists no longer starves
+    later ones of tracks just because earlier ones filled a shared cap.
+
+    Playlists are fetched concurrently (each playlist's pagination is fully
+    independent, so there's no reason to wait on one before starting the
+    next) and the trimmed `fields` request cuts payload size/parse time per
+    page.
+    """
     tracks: list[Track] = []
     seen: set[str] = set()
 
-    for pid in playlist_ids:
-        results = sp.playlist_tracks(pid, limit=50)
-        count = 0
-        while results and len(tracks) < max_total:
-            for item in results["items"]:
-                if len(tracks) >= max_total:
-                    break
-                if not item:
-                    continue
-                raw = item.get("track") or item.get("item")
-                if not raw or not raw.get("id"):
-                    continue
-                if raw["id"] in seen:
-                    continue
-                seen.add(raw["id"])
-                artists = raw.get("artists") or []
-                album   = raw.get("album") or {}
-                images  = album.get("images") or []
-                tracks.append(Track(
-                    id=raw["id"],
-                    name=raw["name"],
-                    artist=artists[0]["name"] if artists else "Unknown",
-                    artist_id=artists[0]["id"] if artists else None,
-                    album=album.get("name", "Unknown"),
-                    image=images[0]["url"] if images else None,
-                    uri=raw["uri"],
-                    preview_url=raw.get("preview_url"),
-                    popularity=raw.get("popularity", 0),
-                    explicit=raw.get("explicit", False),
-                ))
-                count += 1
-            if results["next"] and len(tracks) < max_total:
-                results = sp.next(results)
-            else:
-                break
+    with ThreadPoolExecutor(max_workers=min(8, len(playlist_ids)) or 1) as pool:
+        results = pool.map(lambda pid: _fetch_one_playlist(sp, pid, max_per_playlist), playlist_ids)
+
+    for playlist_tracks in results:
+        for t in playlist_tracks:
+            if t.id in seen:
+                continue
+            seen.add(t.id)
+            tracks.append(t)
 
     return tracks
 
@@ -163,42 +199,25 @@ def probe_audio_features(sp: spotipy.Spotify, track_id: str) -> dict:
     except Exception as e:
         return {"ok": False, "error": str(e), "type": type(e).__name__}
 
-    enriched: list[Track] = []
-    for t in tracks:
-        f = features_map.get(t.id, {})
-        enriched.append(t.model_copy(update={
-            "energy":           f.get("energy"),
-            "valence":          f.get("valence"),
-            "danceability":     f.get("danceability"),
-            "tempo":            f.get("tempo"),
-            "acousticness":     f.get("acousticness"),
-            "instrumentalness": f.get("instrumentalness"),
-            "loudness":         f.get("loudness"),
-            "speechiness":      f.get("speechiness"),
-        }))
-    return enriched
-
 
 # ── Genre enrichment ──────────────────────────────────────────────────────────
 
 def enrich_with_genres(sp: spotipy.Spotify, tracks: list[Track]) -> list[Track]:
     artist_ids = list({t.artist_id for t in tracks if t.artist_id})
-    genres_map: dict[str, list[str]] = {}
+    missing = [aid for aid in artist_ids if aid not in _genre_cache]
 
-    for i in range(0, len(artist_ids), 50):
-        batch = [aid for aid in artist_ids[i:i + 50] if aid]
-        if not batch:
-            continue
+    for i in range(0, len(missing), 50):
+        batch = missing[i:i + 50]
         try:
             result = sp.artists(batch)
             for artist in result.get("artists", []):
                 if artist:
-                    genres_map[artist["id"]] = artist.get("genres", [])
+                    _genre_cache[artist["id"]] = artist.get("genres", [])
         except Exception:
             continue
 
     return [
-        t.model_copy(update={"genres": genres_map.get(t.artist_id, [])})
+        t.model_copy(update={"genres": _genre_cache.get(t.artist_id, [])})
         for t in tracks
     ]
 
