@@ -56,8 +56,19 @@ export function useAuth() {
     setUser(null)
   }, [])
 
-  // On mount: check stored tokens
+  // On mount: check stored tokens.
+  // Skip entirely on /callback — that page is the authoritative source of
+  // truth right after an OAuth login and calls login() itself. Without this
+  // guard, this effect's own /me call (using whatever old token was already
+  // in localStorage) races Callback's /me call (using the fresh token), and
+  // whichever resolves last wins — sometimes leaving the previous account's
+  // profile active even though a new account just logged in.
   useEffect(() => {
+    if (window.location.pathname.startsWith('/callback')) {
+      setReady(true)
+      setLoading(false)
+      return
+    }
     ;(async () => {
       const ok = await ensureFreshToken()
       if (ok) {

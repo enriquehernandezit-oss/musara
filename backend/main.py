@@ -24,6 +24,7 @@ returns a new access_token.
 from __future__ import annotations
 import os
 import time
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import spotipy
@@ -66,6 +67,27 @@ app.add_middleware(
 )
 
 bearer = HTTPBearer()
+
+# ── Daily generate limit ──────────────────────────────────────────────────────
+# Simple in-memory cap on how many playlists /generate will build per day
+# (protects the Anthropic API budget). Resets at UTC midnight. This is
+# process-memory only — it resets on redeploy and isn't shared across
+# multiple instances, but that's fine for a single-instance deployment.
+DAILY_GENERATE_LIMIT = 15
+_generate_usage = {"date": None, "count": 0}
+
+
+def _check_daily_generate_limit() -> None:
+    today = datetime.now(timezone.utc).date().isoformat()
+    if _generate_usage["date"] != today:
+        _generate_usage["date"] = today
+        _generate_usage["count"] = 0
+    if _generate_usage["count"] >= DAILY_GENERATE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily limit of {DAILY_GENERATE_LIMIT} playlist generations reached. Try again tomorrow.",
+        )
+    _generate_usage["count"] += 1
 
 
 def get_spotify(
@@ -151,6 +173,8 @@ def generate(
         raise HTTPException(status_code=422, detail="mood is required")
     if not body.playlist_ids:
         raise HTTPException(status_code=422, detail="playlist_ids must not be empty")
+
+    _check_daily_generate_limit()
 
     # 1. Fetch raw tracks
     try:
