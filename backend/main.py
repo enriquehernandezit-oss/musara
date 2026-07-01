@@ -46,11 +46,18 @@ load_dotenv()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://frontend-production-9da4.up.railway.app",
+    FRONTEND_URL,  # picks up any value set in .env
+]
+
 app = FastAPI(title="Musara API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=list(dict.fromkeys(ALLOWED_ORIGINS)),  # deduplicate
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
