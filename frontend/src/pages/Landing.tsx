@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { getLoginUrl } from '../api'
 
 export default function Landing() {
   const [authUrl, setAuthUrl] = useState<string | null>(null)
+  const [authError, setAuthError] = useState<string | null>(null)
 
   useEffect(() => {
     getLoginUrl().then(setAuthUrl).catch(console.error)
+
+    const params = new URLSearchParams(window.location.search)
+    const error = params.get('error')
+    if (error) {
+      setAuthError(error === 'access_denied' ? 'Spotify authorization was cancelled.' : 'Something went wrong connecting to Spotify — try again.')
+      window.history.replaceState({}, '', window.location.pathname)
+    }
   }, [])
 
   return (
@@ -23,17 +32,29 @@ export default function Landing() {
           Energy. Valence. Tempo. Danceability. Real numbers, real results.
         </p>
 
-        {authUrl ? (
-          <a href={authUrl} className="btn btn-primary btn-lg">
-            <SpotifyIcon />
-            Connect with Spotify
-          </a>
-        ) : (
-          <button className="btn btn-primary btn-lg" disabled>
-            <div className="spinner" />
-            Loading...
-          </button>
+        {authError && (
+          <p style={{ color: '#ff4444', fontFamily: "'DM Mono',monospace", fontSize: '0.7rem', marginBottom: '1rem' }}>
+            {authError}
+          </p>
         )}
+
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {authUrl ? (
+            <a href={authUrl} className="btn btn-primary btn-lg">
+              <SpotifyIcon />
+              Connect with Spotify
+            </a>
+          ) : (
+            <button className="btn btn-primary btn-lg" disabled>
+              <div className="spinner" />
+              Loading...
+            </button>
+          )}
+
+          <Link to="/guest" className="btn btn-ghost btn-lg">
+            Try without Spotify
+          </Link>
+        </div>
 
         <p className="landing-disclaimer">Requires a Spotify account</p>
       </div>

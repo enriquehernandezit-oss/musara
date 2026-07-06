@@ -19,12 +19,34 @@ import os
 import json
 import anthropic
 from dotenv import load_dotenv
-from models import Track, Preferences, PlaylistResult
+from models import Track, Preferences, GuestPreferences, PlaylistResult
 
 load_dotenv()
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL  = "claude-haiku-4-5-20251001"
+
+# Precise per-level calibration instead of coarse 5-way buckets — gives
+# Claude concrete reference points for tempo/production/intensity at each of
+# the 10 levels so the energy slider actually moves the needle. Shared by
+# both the Spotify-backed curation flow and the guest (no-Spotify) flow.
+ENERGY_CALIBRATION = {
+    1:  "extremely low energy — sparse, hushed, almost ambient (think: solo piano, whispered vocals, minimal percussion)",
+    2:  "very low energy — slow, intimate, soft dynamics (think: quiet acoustic ballads)",
+    3:  "low energy — relaxed and mellow, gentle groove, no urgency",
+    4:  "low-moderate energy — laid-back but with some rhythmic movement (think: chill R&B, soft indie)",
+    5:  "moderate energy — comfortable mid-tempo, present but not driving",
+    6:  "moderate-high energy — clear rhythmic drive, upbeat but not aggressive",
+    7:  "high energy — upbeat, propulsive, strong beat, makes you want to move",
+    8:  "very high energy — fast, punchy, dense production, hard-hitting drums/bass",
+    9:  "intense energy — aggressive, loud, high tempo, adrenaline-driving",
+    10: "maximum intensity — full-throttle, hardest-hitting, most explosive tracks available",
+}
+
+
+def _energy_desc(energy_level: int) -> str:
+    return ENERGY_CALIBRATION[max(1, min(10, energy_level))]
+
 
 # ── Hard-constraint pre-filter (no audio features needed) ────────────────────
 
@@ -91,22 +113,7 @@ def _claude_curate(
     if preferences.include_artists.strip():
         include_hint = f"\nPrioritize tracks by: {preferences.include_artists}"
 
-    # Precise per-level calibration instead of coarse 5-way buckets — this
-    # gives Claude concrete reference points for tempo/production/intensity
-    # at each of the 10 levels so the slider actually moves the needle.
-    ENERGY_CALIBRATION = {
-        1:  "extremely low energy — sparse, hushed, almost ambient (think: solo piano, whispered vocals, minimal percussion)",
-        2:  "very low energy — slow, intimate, soft dynamics (think: quiet acoustic ballads)",
-        3:  "low energy — relaxed and mellow, gentle groove, no urgency",
-        4:  "low-moderate energy — laid-back but with some rhythmic movement (think: chill R&B, soft indie)",
-        5:  "moderate energy — comfortable mid-tempo, present but not driving",
-        6:  "moderate-high energy — clear rhythmic drive, upbeat but not aggressive",
-        7:  "high energy — upbeat, propulsive, strong beat, makes you want to move",
-        8:  "very high energy — fast, punchy, dense production, hard-hitting drums/bass",
-        9:  "intense energy — aggressive, loud, high tempo, adrenaline-driving",
-        10: "maximum intensity — full-throttle, hardest-hitting, most explosive tracks available",
-    }
-    energy_desc = ENERGY_CALIBRATION[max(1, min(10, energy_level))]
+    energy_desc = _energy_desc(energy_level)
 
     language_pref = (preferences.language or "").strip()
     language_section = ""
@@ -220,4 +227,119 @@ def build_mood_playlist(
         playlist_description=naming["playlist_description"],
         mood_summary=naming["mood_summary"],
         tracks=playlist_tracks,
+    )
+
+
+# ── Guest mode: no Spotify account, no track pool ─────────────────────────────
+#
+# There's no library to select from here, so Claude has to recall real songs
+# from its own knowledge rather than rank a given pool. Tracks come back with
+# no Spotify id/uri/image/preview — this playlist can't be exported until the
+# user connects Spotify separately.
+
+def build_guest_playlist(
+    mood: str,
+    preferences: GuestPreferences,
+) -> PlaylistResult:
+    energy_level = int(preferences.energy) if preferences.energy else 5
+    energy_desc = _energy_desc(energy_level)
+    count = max(5, min(50, preferences.track_count or 20))
+
+    filters = []
+    if preferences.activity.strip():
+        filters.append(f"ACTIVITY: {preferences.activity}")
+    if preferences.genre.strip():
+        filters.append(f"GENRE PREFERENCE: {preferences.genre}")
+    if preferences.decade.strip() and preferences.decade.lower() not in ("no preference", ""):
+        filters.append(f"ERA/DECADE: favor tracks from {preferences.decade}")
+    if preferences.include_artists.strip():
+        filters.append(f"Prioritize artists similar to or including: {preferences.include_artists}")
+    if preferences.exclude_artists.strip():
+        filters.append(f"Do NOT include these artists: {preferences.exclude_artists}")
+    if preferences.extra.strip():
+        filters.append(f"NOTES: {preferences.extra}")
+
+    language_pref = (preferences.language or "").strip()
+    if language_pref and language_pref.lower() not in ("no preference", ""):
+        filters.append(
+            f"LANGUAGE: only include tracks whose vocals/lyrics are in {language_pref} "
+            "(or any of the listed languages if multiple are given). Judge this from "
+            "your own knowledge of the song/artist — if unsure, leave it out."
+        )
+
+    filters_text = "\n".join(f"- {f}" for f in filters) if filters else "- none"
+
+    prompt = f"""You are a music curator building a playlist from scratch using only your own
+knowledge of real, existing songs — there is no track library to choose from, so every
+track must be one you're confident actually exists and matches what you're picking it for.
+
+MOOD (from the user, verbatim): "{mood}"
+   - If this reads as a short label (e.g. "Hype", "Chill", "Sad"), interpret it directly.
+   - If this reads as a descriptive phrase or sentence (e.g. "late-night drive",
+     "pre-match warmup", "slow Sunday morning coffee"), treat it as richer context:
+     infer the implied setting, time of day, activity, and emotional arc, and let
+     those inferences drive track choice as much as the literal words do.
+ENERGY: {energy_level}/10 — {energy_desc}
+   - Treat this as a hard constraint: every track's actual tempo/production intensity
+     should match this level.
+
+FILTERS:
+{filters_text}
+
+YOUR TASK:
+1. Pick EXACTLY {count} real songs that genuinely fit the mood, energy, and filters above.
+   - Only include songs you're confident actually exist with that title/artist — never invent one.
+   - Be specific and varied — do not repeat an artist more than twice.
+2. ORDER them intentionally: ease the listener in, build through the middle, then
+   wind down or peak at the end depending on the mood.
+3. Name and describe the playlist.
+
+Return ONLY valid JSON, no other text:
+{{
+  "tracks": [
+    {{"name": "Song Title", "artist": "Artist Name", "genre": "primary genre"}},
+    ...
+  ],
+  "mood_interpretation": "one sentence on what this mood calls for musically",
+  "playlist_name": "2-4 word creative name",
+  "playlist_description": "one punchy sentence describing the vibe",
+  "mood_summary": "2 sentences on the listening experience and energy arc"
+}}"""
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = response.content[0].text
+    print(f"[guest_curate] raw response: {raw[:400]}", flush=True)
+
+    data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+    raw_tracks = data.get("tracks", [])
+
+    tracks = [
+        Track(
+            id=f"guest-{i}",
+            name=t.get("name", "Unknown"),
+            artist=t.get("artist", "Unknown"),
+            artist_id=None,
+            album="",
+            image=None,
+            uri="",
+            preview_url=None,
+            popularity=0,
+            explicit=False,
+            genres=[t["genre"]] if t.get("genre") else [],
+        )
+        for i, t in enumerate(raw_tracks)
+        if t.get("name") and t.get("artist")
+    ]
+
+    mood_interp = data.get("mood_interpretation", "")
+
+    return PlaylistResult(
+        playlist_name=data.get("playlist_name") or f"{mood} Mix",
+        playlist_description=data.get("playlist_description") or "A curated playlist for your current mood.",
+        mood_summary=data.get("mood_summary") or mood_interp,
+        tracks=tracks,
     )

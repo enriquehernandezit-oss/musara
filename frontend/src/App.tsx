@@ -4,6 +4,7 @@ import { useAuth } from './hooks/useAuth'
 import Landing from './pages/Landing'
 import Callback from './pages/Callback'
 import Build from './pages/Build'
+import GuestBuild from './pages/GuestBuild'
 
 // ── Auth context ──────────────────────────────────────────────────────────────
 type AuthCtx = ReturnType<typeof useAuth>
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="/"          element={<LandingGate />} />
           <Route path="/callback"  element={<Callback />} />
           <Route path="/build"     element={<RequireAuth><Build /></RequireAuth>} />
+          <Route path="/guest"     element={<GuestBuild />} />
           <Route path="*"          element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

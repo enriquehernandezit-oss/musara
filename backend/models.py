@@ -74,6 +74,29 @@ class PlaylistResult(BaseModel):
     tracks: list[Track]
 
 
+# ── Guest generate (no Spotify account required) ──────────────────────────────
+# Claude builds a playlist purely from its own music knowledge — no Spotify
+# track pool involved, so there's no library to filter from. The extra
+# filters exist to narrow down what Claude picks since there's no real
+# tracklist to constrain it.
+
+class GuestPreferences(BaseModel):
+    activity: str = ""
+    energy: str = "5"
+    language: str = ""
+    genre: str = ""
+    decade: str = ""           # e.g. "2010s", "90s", "no preference"
+    include_artists: str = ""
+    exclude_artists: str = ""
+    extra: str = ""
+    track_count: int = 20
+
+
+class GuestGenerateRequest(BaseModel):
+    mood: str
+    preferences: GuestPreferences = GuestPreferences()
+
+
 # ── Export request / response ─────────────────────────────────────────────────
 
 class ExportRequest(BaseModel):

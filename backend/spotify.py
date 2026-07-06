@@ -226,6 +226,42 @@ def enrich_with_genres(sp: spotipy.Spotify, tracks: list[Track]) -> list[Track]:
     ]
 
 
+# ── Guest track enrichment (search-based, app-only client) ────────────────────
+# Guest mode tracks come purely from Claude's knowledge — no id/image/uri yet.
+# Look each one up by name+artist via Spotify's public Search API (using the
+# app-only client credentials client, no user login needed) to fill in real
+# album art, a playable uri, and a preview url where Spotify has a match.
+# Tracks that can't be matched are left as-is (placeholder art in the UI).
+
+def _search_one_track(sp: spotipy.Spotify, track: Track) -> Track:
+    query = f"track:{track.name} artist:{track.artist}"
+    try:
+        result = sp.search(q=query, type="track", limit=1)
+        items = (result.get("tracks") or {}).get("items") or []
+        if not items:
+            return track
+        raw = items[0]
+        album  = raw.get("album") or {}
+        images = album.get("images") or []
+        return track.model_copy(update={
+            "id":           raw.get("id", track.id),
+            "image":        images[0]["url"] if images else None,
+            "uri":          raw.get("uri", track.uri),
+            "preview_url":  raw.get("preview_url"),
+            "popularity":   raw.get("popularity", track.popularity),
+            "explicit":     raw.get("explicit", track.explicit),
+            "album":        album.get("name", track.album),
+        })
+    except Exception as e:
+        print(f"[guest_enrich] search failed for '{track.name}' by '{track.artist}': {e}", flush=True)
+        return track
+
+
+def enrich_guest_tracks(sp: spotipy.Spotify, tracks: list[Track]) -> list[Track]:
+    with ThreadPoolExecutor(max_workers=min(8, len(tracks)) or 1) as pool:
+        return list(pool.map(lambda t: _search_one_track(sp, t), tracks))
+
+
 # ── Export ────────────────────────────────────────────────────────────────────
 
 def create_playlist(

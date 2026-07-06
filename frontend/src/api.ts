@@ -70,6 +70,23 @@ export interface ExportResult {
   name: string
 }
 
+export interface GuestPreferences {
+  activity?: string
+  energy?: string
+  language?: string
+  genre?: string
+  decade?: string
+  include_artists?: string
+  exclude_artists?: string
+  extra?: string
+  track_count?: number
+}
+
+export interface GuestGenerateRequest {
+  mood: string
+  preferences: GuestPreferences
+}
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 function getToken(): string | null {
@@ -121,6 +138,13 @@ export async function getPlaylists(): Promise<Playlist[]> {
 
 export async function generate(body: GenerateRequest): Promise<PlaylistResult> {
   return request<PlaylistResult>('/generate', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function guestGenerate(body: GuestGenerateRequest): Promise<PlaylistResult> {
+  return request<PlaylistResult>('/guest/generate', {
     method: 'POST',
     body: JSON.stringify(body),
   })

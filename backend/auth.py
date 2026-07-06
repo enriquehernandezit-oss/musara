@@ -14,8 +14,9 @@ Token flow:
 
 import os
 import time
+from typing import Optional
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth
+from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -64,3 +65,22 @@ def is_expired(token_info: dict) -> bool:
 
 def make_spotify_client(access_token: str) -> spotipy.Spotify:
     return spotipy.Spotify(auth=access_token)
+
+
+# ── App-only client (no user login) ───────────────────────────────────────────
+# Client Credentials flow — used for guest mode, where there's no logged-in
+# user to authorize as. Only grants access to public catalog data (search,
+# tracks, albums, artists) — no playlist read/write or user data.
+
+_app_client: Optional[spotipy.Spotify] = None
+
+
+def get_app_spotify_client() -> spotipy.Spotify:
+    global _app_client
+    if _app_client is None:
+        creds = SpotifyClientCredentials(
+            client_id=os.getenv("SPOTIFY_CLIENT_ID"),
+            client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
+        )
+        _app_client = spotipy.Spotify(client_credentials_manager=creds)
+    return _app_client

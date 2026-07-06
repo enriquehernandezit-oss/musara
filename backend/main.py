@@ -9,6 +9,7 @@ POST /auth/refresh            → { access_token, expires_at }
 GET  /me                      → UserProfile
 GET  /playlists               → list[Playlist]
 POST /generate                → PlaylistResult
+POST /guest/generate          → PlaylistResult (no Spotify account required)
 POST /export                  → ExportResult
 
 Auth
@@ -25,6 +26,7 @@ from __future__ import annotations
 import os
 import time
 from datetime import datetime, timezone
+from typing import Optional
 from urllib.parse import urlencode
 
 import spotipy
@@ -40,16 +42,17 @@ import agent as ai
 from models import (
     Playlist, UserProfile,
     GenerateRequest, PlaylistResult,
+    GuestGenerateRequest,
     ExportRequest, ExportResult,
 )
 
 load_dotenv()
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5175")
 
 ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
     "https://frontend-production-9da4.up.railway.app",
     "https://backend-production-d382.up.railway.app",
     "https://musara.up.railway.app",
@@ -105,15 +108,22 @@ def login_url() -> dict:
 
 
 @app.get("/auth/callback")
-def callback(code: str):
+def callback(code: Optional[str] = None, error: Optional[str] = None):
     """
-    Spotify redirects here after the user authorizes.
+    Spotify redirects here after the user authorizes (or cancels).
     Exchange the code, then redirect to the frontend with tokens in the query string.
+    If the user cancelled (no code / an error param instead), send them back to the
+    landing page with an error flag instead of showing a raw JSON error page.
     """
+    if not code:
+        params = urlencode({"error": error or "access_denied"})
+        return RedirectResponse(url=f"{FRONTEND_URL}/?{params}")
+
     try:
         token_info = oauth.exchange_code(code)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Token exchange failed: {exc}")
+        params = urlencode({"error": "token_exchange_failed"})
+        return RedirectResponse(url=f"{FRONTEND_URL}/?{params}")
 
     params = urlencode({
         "access_token":  token_info["access_token"],
@@ -195,6 +205,32 @@ def generate(
         result = ai.build_mood_playlist(tracks, body.mood, body.preferences)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Curation failed: {exc}")
+
+    return result
+
+
+# ── Guest generate (no Spotify account required) ─────────────────────────────
+
+@app.post("/guest/generate", response_model=PlaylistResult)
+def guest_generate(body: GuestGenerateRequest) -> PlaylistResult:
+    if not body.mood:
+        raise HTTPException(status_code=422, detail="mood is required")
+
+    _check_daily_generate_limit()
+
+    try:
+        result = ai.build_guest_playlist(body.mood, body.preferences)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Curation failed: {exc}")
+
+    # Best-effort: look each track up on Spotify to attach a real uri/preview
+    # (useful if guest mode ever supports export). Cover art is intentionally
+    # NOT used here — the guest UI renders a generated gradient cover instead,
+    # since per-track Spotify art is patchy (not every Claude pick resolves).
+    try:
+        result.tracks = sp_api.enrich_guest_tracks(oauth.get_app_spotify_client(), result.tracks)
+    except Exception as exc:
+        print(f"[guest_generate] track enrichment failed: {exc}", flush=True)
 
     return result
 
