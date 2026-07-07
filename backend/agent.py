@@ -17,6 +17,7 @@ can judge a track's actual language from its own knowledge of the song/artist.
 from __future__ import annotations
 import os
 import json
+import random
 import anthropic
 from dotenv import load_dotenv
 from models import Track, Preferences, GuestPreferences, PlaylistResult
@@ -73,6 +74,29 @@ def _prefilter(tracks: list[Track], preferences: Preferences) -> list[Track]:
         filtered.append(t)
 
     return filtered
+
+
+# ── Prompt-size cap (guarantees featured artists survive) ────────────────────
+
+def _cap_pool_size(tracks: list[Track], preferences: Preferences, limit: int = 600) -> list[Track]:
+    """
+    Selecting several large playlists can put thousands of tracks in front
+    of Claude, which balloons prompt size/cost for no real benefit. Trim the
+    pool down to `limit`, but any track matching a featured-artist preference
+    is always kept — random trimming must never be what silently drops the
+    exact artist the user asked for.
+    """
+    if len(tracks) <= limit:
+        return tracks
+
+    include = [a.strip().lower() for a in preferences.include_artists.split(",") if a.strip()]
+    matched_ids = {t.id for t in tracks if any(a in t.artist.lower() for a in include)} if include else set()
+
+    matched   = [t for t in tracks if t.id in matched_ids]
+    unmatched = [t for t in tracks if t.id not in matched_ids]
+
+    room = max(0, limit - len(matched))
+    return matched + random.sample(unmatched, min(room, len(unmatched)))
 
 
 # ── Claude: select + rank tracks by mood, and name the playlist ──────────────
@@ -224,7 +248,11 @@ def build_mood_playlist(
     if not filtered:
         filtered = tracks  # if all tracks were filtered out, use everything
 
-    # 2. Claude picks + ranks from the filtered pool, and names the result
+    # 2. Keep the prompt bounded for large playlist selections, without ever
+    #    dropping a featured-artist match
+    filtered = _cap_pool_size(filtered, preferences)
+
+    # 3. Claude picks + ranks from the filtered pool, and names the result
     playlist_tracks, naming = _claude_curate(filtered, mood, preferences, n=80)
 
     return PlaylistResult(

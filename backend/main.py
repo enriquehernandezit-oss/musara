@@ -188,7 +188,7 @@ def generate(
 
     # 1. Fetch raw tracks
     try:
-        tracks = sp_api.fetch_tracks_from_playlists(sp, body.playlist_ids, max_per_playlist=100)
+        tracks = sp_api.fetch_tracks_from_playlists(sp, body.playlist_ids)
     except spotipy.SpotifyException as exc:
         raise HTTPException(status_code=exc.http_status or 502, detail=str(exc))
 

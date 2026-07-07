@@ -58,7 +58,15 @@ def get_all_playlists(sp: spotipy.Spotify) -> list[Playlist]:
 
 # ── Track fetching ────────────────────────────────────────────────────────────
 
-def _fetch_one_playlist(sp: spotipy.Spotify, pid: str, max_per_playlist: int) -> list[Track]:
+def _fetch_one_playlist(sp: spotipy.Spotify, pid: str) -> list[Track]:
+    """
+    Fetches every track in the playlist, not just the first page. Spotify's
+    API has no "sort by date added" param — items come back in the playlist's
+    raw stored order, unrelated to whatever sort view is active in the
+    Spotify app. Stopping early at a fixed count silently drops tracks based
+    on that arbitrary order (e.g. missing recently-added songs in a large,
+    append-only playlist), so we page through all of it instead.
+    """
     tracks: list[Track] = []
     try:
         results = sp.playlist_tracks(pid, limit=100)
@@ -66,11 +74,8 @@ def _fetch_one_playlist(sp: spotipy.Spotify, pid: str, max_per_playlist: int) ->
         print(f"[fetch_tracks] failed to fetch playlist {pid}: {e}", flush=True)
         return tracks
 
-    count = 0
-    while results and count < max_per_playlist:
+    while results:
         for item in results["items"]:
-            if count >= max_per_playlist:
-                break
             if not item:
                 continue
             raw = item.get("track") or item.get("item")
@@ -91,8 +96,7 @@ def _fetch_one_playlist(sp: spotipy.Spotify, pid: str, max_per_playlist: int) ->
                 popularity=raw.get("popularity", 0),
                 explicit=raw.get("explicit", False),
             ))
-            count += 1
-        if results["next"] and count < max_per_playlist:
+        if results["next"]:
             try:
                 results = sp.next(results)
             except Exception as e:
@@ -108,13 +112,12 @@ def _fetch_one_playlist(sp: spotipy.Spotify, pid: str, max_per_playlist: int) ->
 def fetch_tracks_from_playlists(
     sp: spotipy.Spotify,
     playlist_ids: list[str],
-    max_per_playlist: int = 100,
 ) -> list[Track]:
     """
-    Reads each playlist in full (paginating through every page Spotify has),
-    capped at `max_per_playlist` tracks per individual playlist — not a
-    combined total. Selecting several large playlists no longer starves
-    later ones of tracks just because earlier ones filled a shared cap.
+    Reads each selected playlist in full (paginating through every page
+    Spotify has) — no per-playlist track cap, so nothing gets silently
+    excluded just because of where it happens to sit in the playlist's
+    stored order.
 
     Playlists are fetched concurrently (each playlist's pagination is fully
     independent, so there's no reason to wait on one before starting the
@@ -126,7 +129,7 @@ def fetch_tracks_from_playlists(
     seen: set[str] = set()
 
     with ThreadPoolExecutor(max_workers=min(8, len(playlist_ids)) or 1) as pool:
-        results = pool.map(lambda pid: _fetch_one_playlist(sp, pid, max_per_playlist), playlist_ids)
+        results = pool.map(lambda pid: _fetch_one_playlist(sp, pid), playlist_ids)
 
     for playlist_tracks in results:
         for t in playlist_tracks:
