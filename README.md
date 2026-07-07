@@ -4,7 +4,15 @@
 
 ## Demo
 
-`Musara.Demo.mp4`
+Spotify Account Login:
+
+https://github.com/user-attachments/assets/ed2221ec-81ca-4e43-b687-068025f32c78
+
+Guest Login:
+
+https://github.com/user-attachments/assets/773d0e85-9a2f-4c92-96ca-e99d9fab4076
+
+
 
 **Turn your Spotify library into a mood-matched playlist.**
 
