@@ -187,9 +187,14 @@ Return ONLY valid JSON, no other text:
     selected = [tracks[i] for i in indices]
     mood_interp = data.get("mood_interpretation", "")
 
-    # Pad only if drastically short
+    # Pad only if drastically short — but never when the user set a language or
+    # featured-artist preference. In that case a small result IS the correct
+    # result (most of the pool genuinely doesn't match); backfilling by raw
+    # popularity would silently override the very preference that narrowed
+    # the selection down, which is what made this look "ignored".
+    narrowing_prefs = bool(language_pref) or bool(preferences.include_artists.strip())
     min_acceptable = max(5, target // 2)
-    if len(selected) < min_acceptable:
+    if len(selected) < min_acceptable and not narrowing_prefs:
         selected_ids = {t.id for t in selected}
         remainder = sorted(
             [t for t in tracks if t.id not in selected_ids],
