@@ -270,9 +270,7 @@ def create_playlist(
     description: str,
     track_uris: list[str],
 ) -> dict:
-    user = sp.current_user()
-    playlist = sp.user_playlist_create(
-        user=user["id"],
+    playlist = sp.current_user_playlist_create(
         name=name,
         public=False,
         description=description,

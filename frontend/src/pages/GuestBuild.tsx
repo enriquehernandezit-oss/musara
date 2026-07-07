@@ -270,12 +270,7 @@ function GuestResults({ result, activeMood }: { result: PlaylistResult; activeMo
             </div>
             <p className="export-note">
               This playlist is built from Claude's own music knowledge — no Spotify library involved.
-              <br /><br />
-              Connect your Spotify account to export playlists like this directly to your library.
             </p>
-            <Link to="/" className="btn btn-primary w-full" style={{ justifyContent: 'center' }}>
-              Connect with Spotify
-            </Link>
           </div>
         </div>
       </div>
